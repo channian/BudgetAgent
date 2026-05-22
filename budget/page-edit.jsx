@@ -3,17 +3,18 @@
 function EditPage({ budget, onBack, onSave }) {
   const isNew = !budget;
   const [form, setForm] = React.useState(() => ({
-    project: budget?.project || "",
-    categoryId: budget?.categoryId || "RD",
-    subCategory: budget?.subCategory || "",
-    ownerId: budget?.owner?.id || MOCK.OWNERS[0].id,
-    amount: budget?.amount || "",
-    notes: budget?.notes || "",
+    project:       budget?.project       || "",
+    categoryId:    budget?.categoryId    || "RD",
+    subCategory:   budget?.subCategory   || "",
+    expertName:    budget?.expertName    || "",
+    ownerId:       budget?.owner?.id     || MOCK.OWNERS[0].id,
+    amount:        budget?.amount        || "",
+    notes:         budget?.notes         || "",
     expertComment: budget?.expertComment || "",
-    expertResult: budget?.expertResult || null,
-    aiResult: budget?.aiResult || null,
-    aiConfidence: budget?.aiConfidence || null,
-    aiReason: budget?.aiReason || "",
+    expertResult:  budget?.expertResult  || null,
+    aiResult:      budget?.aiResult      || null,
+    aiConfidence:  budget?.aiConfidence  || null,
+    aiReason:      budget?.aiReason      || "",
   }));
   const [jsonText, setJsonText] = React.useState("");
   const [jsonErr, setJsonErr] = React.useState("");
@@ -25,22 +26,28 @@ function EditPage({ budget, onBack, onSave }) {
     setJsonErr("");
     try {
       const trimmed = jsonText.trim();
-      if (!trimmed) {
-        setForm((f) => ({ ...f, ...mapAi(MOCK.SAMPLE_AI_JSON) }));
-        setJsonText(JSON.stringify(MOCK.SAMPLE_AI_JSON, null, 2));
-        return;
-      }
-      const j = JSON.parse(trimmed);
-      setForm((f) => ({ ...f, ...mapAi(j) }));
+      const j = trimmed ? JSON.parse(trimmed) : MOCK.SAMPLE_AI_JSON;
+      if (!trimmed) setJsonText(JSON.stringify(MOCK.SAMPLE_AI_JSON, null, 2));
+
+      const mapped = API.mapAiJsonPaste(j);
+      if (!mapped || !mapped.aiResult) { setJsonErr("無法識別 JSON 格式，請確認欄位"); return; }
+
+      // If RPA JSON (Chinese keys), also fill project metadata fields
+      const catMatch = MOCK.CATEGORIES.find(c => c.name === mapped.categoryName);
+      setForm(f => ({
+        ...f,
+        aiResult:     mapped.aiResult,
+        aiConfidence: mapped.aiConfidence,
+        aiReason:     mapped.aiReason,
+        ...(mapped.project     && { project:     mapped.project }),
+        ...(catMatch           && { categoryId:  catMatch.id }),
+        ...(mapped.subCategory && { subCategory: mapped.subCategory }),
+        ...(mapped.expertName  && { expertName:  mapped.expertName }),
+      }));
     } catch (e) {
       setJsonErr("JSON 格式錯誤：" + e.message);
     }
   };
-  const mapAi = (j) => ({
-    aiResult: j.decision === "approve" ? "approve" : j.decision === "reject" ? "reject" : "hold",
-    aiConfidence: Math.round((j.confidence || 0) * 100),
-    aiReason: j.reason || "",
-  });
 
   const dispatchDate = budget?.dispatchDate || new Date();
   const week = MOCK.weekOf(dispatchDate);

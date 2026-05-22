@@ -15,11 +15,15 @@ const DEFAULT_COLS = [
   { k: "cycle",       label: "Cycle Time",   w: 110, min: 90 },
 ];
 
-function ListPage({ scope, budgets, onRow, onNew, onRefresh }) {
+const PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"];
+const COMPLETED_STATUSES = ["CLOSED", "REJECTED"];
+
+function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh }) {
   const isPending = scope === "pending";
+  // API already scopes the data; client-side filter is a safety net
   const filtered = budgets.filter((b) =>
-    isPending ? (b.status === "in_review" || b.status === "new")
-              : (b.status === "approved" || b.status === "rejected")
+    isPending ? PENDING_STATUSES.includes(b.status)
+              : COMPLETED_STATUSES.includes(b.status)
   );
 
   const [q, setQ] = React.useState("");
@@ -102,7 +106,8 @@ function ListPage({ scope, budgets, onRow, onNew, onRefresh }) {
   const totalAmt = rows.reduce((s, b) => s + b.amount, 0);
   const aiApprovedCnt = rows.filter((b) => b.aiResult === "approve").length;
   const overSLA = rows.filter((b) => {
-    const ref = b.signDate || new Date("2026-05-21T10:00:00");
+    if (!PENDING_STATUSES.includes(b.status)) return false;
+    const ref = new Date();
     return (ref - b.dispatchDate) / 86400000 > 3;
   }).length;
 
@@ -118,7 +123,7 @@ function ListPage({ scope, budgets, onRow, onNew, onRefresh }) {
           </div>
         </div>
         <div className="actions">
-          <button className="btn" onClick={onRefresh}><Icon.Refresh/>重新整理</button>
+          <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
           <button className="btn"><Icon.Download/>匯出 CSV</button>
           {isPending && (
             <button className="btn accent" onClick={onNew}>

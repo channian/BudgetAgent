@@ -1,16 +1,43 @@
 /* Budget detail / approval page */
 
-function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
-  const [comment, setComment] = React.useState(budget.expertComment || "");
+const ACTION_LABELS = {
+  CREATE:                "建立預算單",
+  UPDATE:                "欄位更新",
+  APPROVE:               "核可簽核",
+  REJECT_FINAL:          "最終退件",
+  RETURN_FOR_SUPPLEMENT: "退回補件",
+  RESUBMIT:              "重新遞交",
+  SLA_REMINDER:          "SLA 催辦",
+};
+
+function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit }) {
+  const [comment,  setComment]  = React.useState(budget.expertComment || "");
   const [decision, setDecision] = React.useState(budget.expertResult);
-  const isFinal = budget.status === "approved" || budget.status === "rejected";
+  const [timeline, setTimeline] = React.useState([]);
+  const [tlLoading, setTlLoading] = React.useState(true);
 
-  const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date("2026-05-21T10:00:00"));
+  const isFinal = budget.status === "CLOSED" || budget.status === "REJECTED";
+  const canAct  = budget.status === "EXPERT_REVIEW";
 
-  const submit = () => {
+  const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
+
+  // Load real timeline
+  React.useEffect(() => {
+    if (!budget.dbId) { setTlLoading(false); return; }
+    API.fetchTimeline(budget.dbId)
+      .then(rows => setTimeline(rows))
+      .catch(() => setTimeline([]))
+      .finally(() => setTlLoading(false));
+  }, [budget.dbId]);
+
+  const submitFinal = () => {
     if (!decision) return;
     if (decision === "approve") onApprove(budget, comment);
-    else onReject(budget, comment);
+    else onReject(budget, comment, true);   // final REJECTED
+  };
+
+  const submitReturn = () => {
+    onReturn(budget, comment);              // PENDING_ACTION
   };
 
   return (
@@ -18,9 +45,9 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
       <div className="page-head">
         <div>
           <div className="flex-row" style={{ marginBottom: 8 }}>
-            <button className="btn ghost sm" onClick={onBack}><Icon.Back/>返回列表</button>
+            <button className="btn ghost sm" onClick={onBack}><Icon.Back />返回列表</button>
             <span className="tag-sm">{budget.categoryId} · {budget.subCategory}</span>
-            <StatusBadge status={budget.status}/>
+            <StatusBadge status={budget.status} />
           </div>
           <h2 style={{ marginBottom: 2 }}>{budget.project}</h2>
           <div className="lede">
@@ -32,7 +59,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
         <div className="actions">
           {!isFinal && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
           <button className="btn">列印審核單</button>
-          <button className="btn ghost"><Icon.More/></button>
+          <button className="btn ghost"><Icon.More /></button>
         </div>
       </div>
 
@@ -42,14 +69,15 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
           <div className="card">
             <div className="card-head">
               <h3>案件資料 <span className="tag">CASE INFO</span></h3>
-              <span className="hint">最後更新 {MOCK.fmtDate(budget.signDate || budget.dispatchDate)}</span>
+              <span className="hint">最後更新 {MOCK.fmtDate(budget.updatedAt || budget.dispatchDate)}</span>
             </div>
             <div className="card-body tight">
               <div className="kv-grid">
                 <div className="kv"><div className="k">週數</div><div className="v mono">W{String(budget.week).padStart(2, "0")} / 2026</div></div>
                 <div className="kv"><div className="k">類別</div><div className="v">{budget.category}</div></div>
-                <div className="kv"><div className="k">判定類別</div><div className="v">{budget.subCategory}</div></div>
+                <div className="kv"><div className="k">判定系統</div><div className="v">{budget.subCategory || "—"}</div></div>
                 <div className="kv"><div className="k">預算單號</div><div className="v mono" style={{ color: "var(--accent-strong)" }}>{budget.id}</div></div>
+                <div className="kv"><div className="k">負責專家</div><div className="v">{budget.expertName || "—"}</div></div>
                 <div className="kv"><div className="k">項目名稱</div><div className="v">{budget.project}</div></div>
                 <div className="kv"><div className="k">預算負責人</div><div className="v">{budget.owner.name} <span style={{ color: "var(--text-muted)", fontSize: 11, marginLeft: 4 }}>· {budget.owner.dept}</span></div></div>
                 <div className="kv"><div className="k">金額</div><div className="v lg">NT$ {fmtAmount(budget.amount)}</div></div>
@@ -62,22 +90,16 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
           {/* AI block */}
           <div className="card">
             <div className="card-head">
-              <h3><Icon.Sparkles/>AI 初審 <span className="tag">MODEL: BUDGET-SCREENER v3.2.1</span></h3>
+              <h3><Icon.Sparkles />AI 初審 <span className="tag">READ-ONLY</span></h3>
               <div className="flex-row">
-                <ResultBadge result={budget.aiResult} kind="ai"/>
-                <Conf value={budget.aiConfidence}/>
+                <ResultBadge result={budget.aiResult} kind="ai" />
+                <Conf value={budget.aiConfidence} />
               </div>
             </div>
             <div className="card-body">
               <div className="ai-block">
                 <h4>原因 / Reason</h4>
-                <div className="reason">{budget.aiReason}</div>
-                <div className="ai-meta">
-                  <span><strong>政策參照</strong> P-005 §3.2</span>
-                  <span><strong>對齊度</strong> OBJ-2026-A3 · 0.74</span>
-                  <span><strong>風險旗標</strong> {budget.aiResult === "reject" ? "VND-02, AMT-HIGH" : "—"}</span>
-                  <span><strong>耗時</strong> 1.42s</span>
-                </div>
+                <div className="reason">{budget.aiReason || "—"}</div>
               </div>
             </div>
           </div>
@@ -86,56 +108,69 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
           <div className="card">
             <div className="card-head">
               <h3>專家複審 <span className="tag">EXPERT REVIEW</span></h3>
-              {isFinal && <ResultBadge result={budget.expertResult}/>}
+              {isFinal && <ResultBadge result={budget.expertResult} />}
             </div>
             <div className="card-body">
               <div className="field" style={{ marginBottom: 14 }}>
-                <label>專家複審評論 {!isFinal && <span className="opt">(將寫入稽核紀錄)</span>}</label>
+                <label>專家複審評論 {canAct && <span className="opt">(將寫入稽核紀錄)</span>}</label>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  readOnly={isFinal}
+                  readOnly={!canAct}
                   placeholder="請說明審核判斷依據、補件要求或後續行動…"
                   rows={4}
                 />
-                {!isFinal && <div className="helper">建議引用具體政策章節或案例編號，以利後續稽核追溯</div>}
+                {canAct && <div className="helper">建議引用具體政策章節或案例編號，以利後續稽核追溯</div>}
               </div>
 
-              {!isFinal ? (
-                <div className="field">
-                  <label>專家審核處置 <span className="req">*</span></label>
-                  <div className="seg">
-                    <button
-                      type="button"
-                      className={decision === "approve" ? "on approve" : ""}
-                      onClick={() => setDecision("approve")}
-                    >
-                      <Icon.Check s={14}/>核可
-                    </button>
-                    <button
-                      type="button"
-                      className={decision === "reject" ? "on reject" : ""}
-                      onClick={() => setDecision("reject")}
-                    >
-                      ✕ 退回
-                    </button>
+              {canAct ? (
+                <>
+                  <div className="field">
+                    <label>最終審核處置 <span className="req">*</span></label>
+                    <div className="seg">
+                      <button
+                        type="button"
+                        className={decision === "approve" ? "on approve" : ""}
+                        onClick={() => setDecision("approve")}
+                      >
+                        <Icon.Check s={14} />核可
+                      </button>
+                      <button
+                        type="button"
+                        className={decision === "reject" ? "on reject" : ""}
+                        onClick={() => setDecision("reject")}
+                      >
+                        ✕ 退件 (最終)
+                      </button>
+                    </div>
                   </div>
-                </div>
+
+                  <div className="flex-row" style={{ marginTop: 18, gap: 8 }}>
+                    <button className="btn primary" disabled={!decision} onClick={submitFinal}>
+                      確認簽核
+                    </button>
+                    <button className="btn" onClick={submitReturn}>
+                      退回申請人補件
+                    </button>
+                    <span className="spacer-x" />
+                    <span className="hint">簽核後不可變更，將同步至 ERP</span>
+                  </div>
+                </>
               ) : (
                 <div className="field">
                   <label>專家審核處置</label>
-                  <div><ResultBadge result={budget.expertResult}/></div>
+                  <div style={{ marginTop: 4 }}>
+                    {budget.expertResult
+                      ? <ResultBadge result={budget.expertResult} />
+                      : <span className="hint">—</span>
+                    }
+                  </div>
                 </div>
               )}
 
-              {!isFinal && (
-                <div className="flex-row" style={{ marginTop: 18, gap: 8 }}>
-                  <button className="btn primary" disabled={!decision} onClick={submit}>
-                    確認簽核
-                  </button>
-                  <button className="btn">退回申請人補件</button>
-                  <span className="spacer-x"/>
-                  <span className="hint">簽核後不可變更，將同步至 ERP</span>
+              {budget.status === "PENDING_ACTION" && (
+                <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--warn-soft)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "oklch(0.5 0.16 75)" }}>
+                  ⚠ 此案件已退回申請人補件，請補件後重新遞交
                 </div>
               )}
             </div>
@@ -161,9 +196,9 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
                 {cyc ? cyc.label : "—"}
               </div>
               <div className="hint" style={{ marginTop: 4 }}>
-                目標 ≤ 3d · {cyc && cyc.hrs / 24 > 3 ? "已超 SLA" : "符合 SLA"}
+                目標 ≤ 3d · {cyc && cyc.hrs / 24 > 3 ? "⚠ 已超 SLA" : "✓ 符合 SLA"}
               </div>
-              <div className="divider-h"/>
+              <div className="divider-h" />
               <div className="flex-row" style={{ justifyContent: "space-between", fontSize: 12 }}>
                 <span style={{ color: "var(--text-muted)" }}>派送</span>
                 <span className="mono">{MOCK.fmtDate(budget.dispatchDate)}</span>
@@ -175,50 +210,32 @@ function DetailPage({ budget, onBack, onApprove, onReject, onEdit }) {
             </div>
           </div>
 
+          {/* Timeline from audit_logs */}
           <div className="card">
             <div className="card-head"><h3>審核時序 <span className="tag">TIMELINE</span></h3></div>
             <div className="card-body">
-              <div className="timeline">
-                <div className="tl-item done">
-                  <div className="who">{budget.owner.name} 建立預算單</div>
-                  <div className="what">{budget.id}</div>
-                  <div className="when">{MOCK.fmtDate(new Date(budget.dispatchDate.getTime() - 3600000))}</div>
+              {tlLoading ? (
+                <div className="hint">載入中…</div>
+              ) : timeline.length === 0 ? (
+                <div className="hint">尚無稽核紀錄</div>
+              ) : (
+                <div className="timeline">
+                  {timeline.map((item, i) => (
+                    <div key={item.log_id || i} className={`tl-item ${i === timeline.length - 1 && !isFinal ? "active" : "done"}`}>
+                      <div className="who">{item.operator} · {ACTION_LABELS[item.action] || item.action}</div>
+                      <div className="what">{item.action === "APPROVE" ? <ResultBadge result="approve" /> : item.action === "REJECT_FINAL" ? <ResultBadge result="reject" /> : null}</div>
+                      <div className="when">{item.timestamp ? MOCK.fmtDate(new Date(item.timestamp)) : "—"}</div>
+                    </div>
+                  ))}
+                  {!isFinal && (
+                    <div className="tl-item">
+                      <div className="who">等待專家決議</div>
+                      <div className="what"><StatusBadge status={budget.status} /></div>
+                      <div className="when">—</div>
+                    </div>
+                  )}
                 </div>
-                <div className="tl-item done">
-                  <div className="who">AI Agent 完成初審</div>
-                  <div className="what">信心度 {budget.aiConfidence}% · <ResultBadge result={budget.aiResult} kind="ai"/></div>
-                  <div className="when">{MOCK.fmtDate(budget.dispatchDate)}</div>
-                </div>
-                <div className={`tl-item ${isFinal ? "done" : "active"}`}>
-                  <div className="who">{isFinal ? "廖建勳 完成複審" : "廖建勳 (進行中)"}</div>
-                  <div className="what">{isFinal ? <ResultBadge result={budget.expertResult}/> : "等待專家決議"}</div>
-                  <div className="when">{budget.signDate ? MOCK.fmtDate(budget.signDate) : "—"}</div>
-                </div>
-                {isFinal && (
-                  <div className="tl-item">
-                    <div className="who">同步至 ERP</div>
-                    <div className="what">SAP-FI · 待批次傳輸</div>
-                    <div className="when">每日 18:00</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-head"><h3>相似歷史案件 <span className="tag">SIMILAR</span></h3></div>
-            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[
-                { id: "BG-2026-W14-0021", amt: budget.amount * 0.92, label: "已核可", cls: "ok" },
-                { id: "BG-2026-W11-0008", amt: budget.amount * 1.08, label: "已核可", cls: "ok" },
-                { id: "BG-2026-W09-0033", amt: budget.amount * 1.34, label: "已退回", cls: "bad" },
-              ].map((s) => (
-                <div key={s.id} className="flex-row" style={{ justifyContent: "space-between", fontSize: 12 }}>
-                  <span className="mono" style={{ color: "var(--accent-strong)" }}>{s.id}</span>
-                  <span className="mono" style={{ color: "var(--text-muted)" }}>NT$ {fmtAmount(Math.round(s.amt))}</span>
-                  <span className={`badge ${s.cls}`}>{s.label}</span>
-                </div>
-              ))}
+              )}
             </div>
           </div>
         </div>

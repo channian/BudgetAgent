@@ -94,12 +94,14 @@ const Icon = {
 
 function StatusBadge({ status }) {
   const map = {
-    new: { cls: "info", label: "新派送" },
-    in_review: { cls: "warn", label: "待簽核" },
-    approved: { cls: "ok", label: "已核可" },
-    rejected: { cls: "bad", label: "已退回" }
+    // DB status values (v1.2 spec)
+    AI_REVIEW:      { cls: "purple", label: "AI 初審中" },
+    EXPERT_REVIEW:  { cls: "cyan",   label: "專家審核中" },
+    PENDING_ACTION: { cls: "warn",   label: "待補件" },
+    CLOSED:         { cls: "ok",     label: "已結案" },
+    REJECTED:       { cls: "bad",    label: "已退件" },
   };
-  const s = map[status] || map.in_review;
+  const s = map[status] || { cls: "muted", label: status || "—" };
   return <span className={`badge ${s.cls}`}><span className="b-dot" />{s.label}</span>;
 }
 

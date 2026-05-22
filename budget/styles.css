@@ -832,7 +832,10 @@ table.dt .owner-cell .dp { font-size: 11px; color: var(--text-muted); }
 .badge.bad { background: var(--bad-soft); color: oklch(0.45 0.18 22); border-color: oklch(0.6 0.2 22 / 0.2); }
 .badge.warn { background: var(--warn-soft); color: oklch(0.5 0.16 75); border-color: oklch(0.72 0.16 75 / 0.25); }
 .badge.info { background: var(--info-soft); color: oklch(0.4 0.13 250); border-color: oklch(0.62 0.16 250 / 0.2); }
-.badge.muted { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+.badge.muted   { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+/* DB status colours — spec hex values mapped to oklch */
+.badge.purple  { background: oklch(0.96 0.04 300); color: oklch(0.38 0.18 300); border-color: oklch(0.55 0.2 300 / 0.2); }
+.badge.cyan    { background: oklch(0.96 0.04 210); color: oklch(0.38 0.14 210); border-color: oklch(0.65 0.15 210 / 0.2); }
 
 /* category chips */
 .cat-chip {

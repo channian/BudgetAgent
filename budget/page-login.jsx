@@ -5,11 +5,21 @@ function LoginPage({ onLogin }) {
   const [pwd, setPwd] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
-  const submit = (e) => {
+  const [error, setError] = React.useState("");
+
+  const submit = async (e) => {
     e.preventDefault();
     if (!user || !pwd) return;
     setBusy(true);
-    setTimeout(() => { setBusy(false); onLogin(user); }, 600);
+    setError("");
+    try {
+      const u = await API.login(user, pwd);
+      onLogin(u);
+    } catch (err) {
+      setError(err.message || "登入失敗，請確認帳號密碼");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -49,6 +59,8 @@ function LoginPage({ onLogin }) {
             autoComplete="current-password"
           />
         </div>
+
+        {error && <div style={{ color: "var(--bad)", fontSize: 12, marginTop: -4 }}>{error}</div>}
 
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? "驗證中…" : "登入"}

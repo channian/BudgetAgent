@@ -1,9 +1,12 @@
 /* Main app shell + routing */
 
 function App() {
-  const [user, setUser] = React.useState(null);
-  const [route, setRoute] = React.useState("pending");
-  const [budgets, setBudgets] = React.useState(() => MOCK.generateBudgets());
+  const [user, setUser]               = React.useState(null);
+  const [authChecked, setAuthChecked] = React.useState(false);
+  const [route, setRoute]             = React.useState("pending");
+  const [budgets, setBudgets]         = React.useState([]);
+  const [loading, setLoading]         = React.useState(false);
+  const [apiError, setApiError]       = React.useState(null);
   const [currentBudget, setCurrentBudget] = React.useState(null);
 
   // Sidebar width (resizable + persisted)
@@ -24,14 +27,12 @@ function App() {
   }/*EDITMODE-END*/;
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
-  // Apply accent color (hex)
   React.useEffect(() => {
     const root = document.documentElement;
-    const hex = t.accentColor || "#2BA8C7";
-    // Build soft & strong variants in oklch via mix
-    root.style.setProperty("--accent", hex);
+    const hex  = t.accentColor || "#2BA8C7";
+    root.style.setProperty("--accent",        hex);
     root.style.setProperty("--accent-strong", `color-mix(in oklch, ${hex} 80%, black)`);
-    root.style.setProperty("--accent-soft", `color-mix(in oklch, ${hex} 14%, white)`);
+    root.style.setProperty("--accent-soft",   `color-mix(in oklch, ${hex} 14%, white)`);
   }, [t.accentColor]);
 
   React.useEffect(() => {
@@ -56,74 +57,135 @@ function App() {
     }
   }, [t.density]);
 
+  // Check existing session on mount
   React.useEffect(() => {
-    if (t.preLoggedIn && !user) setUser("liao.jianxun");
-  }, [t.preLoggedIn]);
+    API.me()
+      .then(u => { setUser(u); setAuthChecked(true); })
+      .catch(() => setAuthChecked(true));
+  }, []);
 
+  // Logout event
   React.useEffect(() => {
-    const h = () => setUser(null);
+    const h = async () => { await API.logout().catch(() => {}); setUser(null); };
     window.addEventListener("app:logout", h);
     return () => window.removeEventListener("app:logout", h);
   }, []);
 
-  const pendingCount = budgets.filter((b) => b.status === "in_review" || b.status === "new").length;
+  // Load budgets whenever user or list route changes
+  const loadBudgets = React.useCallback(async (targetScope) => {
+    const scope = targetScope || (route === "approved" ? "completed" : "pending");
+    setLoading(true);
+    setApiError(null);
+    try {
+      const data = await API.fetchBudgets(scope);
+      setBudgets(data);
+    } catch (e) {
+      if (e.message.includes("401") || e.message.includes("未登入")) {
+        setUser(null);
+      } else {
+        setApiError(e.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [route]);
+
+  React.useEffect(() => {
+    if (user && (route === "pending" || route === "approved")) {
+      loadBudgets(route === "approved" ? "completed" : "pending");
+    }
+  }, [user, route]);
+
+  const pendingCount = budgets.filter(
+    b => b.status === "AI_REVIEW" || b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION"
+  ).length;
 
   const openDetail = (b) => { setCurrentBudget(b); setRoute("detail"); };
-  const goNew = () => { setCurrentBudget(null); setRoute("new"); };
-  const goEdit = (b) => { setCurrentBudget(b); setRoute("edit"); };
-  const goList = () => setRoute("pending");
+  const goNew      = ()  => { setCurrentBudget(null); setRoute("new"); };
+  const goEdit     = (b) => { setCurrentBudget(b); setRoute("edit"); };
+  const goList     = ()  => setRoute("pending");
 
-  const approve = (b, comment) => {
-    setBudgets((arr) => arr.map((x) => x.id === b.id ? { ...x, expertResult: "approve", expertComment: comment, status: "approved", signDate: new Date() } : x));
-    setRoute("pending");
+  const approve = async (b, comment) => {
+    try {
+      await API.approve(b.dbId, comment);
+      setRoute("pending");
+    } catch (e) { setApiError(e.message); }
   };
-  const reject = (b, comment) => {
-    setBudgets((arr) => arr.map((x) => x.id === b.id ? { ...x, expertResult: "reject", expertComment: comment, status: "rejected", signDate: new Date() } : x));
-    setRoute("pending");
+
+  const reject = async (b, comment, final = false) => {
+    try {
+      await API.reject(b.dbId, comment, final);
+      setRoute("pending");
+    } catch (e) { setApiError(e.message); }
   };
-  const saveNew = (data) => {
-    // For demo: just route back
-    setRoute("pending");
+
+  const returnForSupplement = async (b, comment) => {
+    try {
+      await API.reject(b.dbId, comment, false);
+      setRoute("pending");
+    } catch (e) { setApiError(e.message); }
   };
+
+  const saveNew = async (form) => {
+    try {
+      if (currentBudget) {
+        await API.updateBudget(currentBudget.dbId, form);
+      } else {
+        await API.createBudget(form);
+      }
+      setRoute("pending");
+    } catch (e) { setApiError(e.message); }
+  };
+
+  if (!authChecked) {
+    return <div style={{ display: "grid", placeItems: "center", height: "100vh", color: "var(--text-muted)" }}>載入中…</div>;
+  }
 
   if (!user) {
-    return <LoginPage onLogin={(u) => setUser(u)}/>;
+    return <LoginPage onLogin={(u) => setUser(u)} />;
   }
 
   let crumbs = ["待簽核"];
-  let body = null;
+  let body   = null;
+
   if (route === "pending") {
-    body = <ListPage scope="pending" budgets={budgets} onRow={openDetail} onNew={goNew} onRefresh={() => setBudgets(MOCK.generateBudgets())}/>;
+    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} />;
     crumbs = ["待簽核"];
   } else if (route === "approved") {
-    body = <ListPage scope="approved" budgets={budgets} onRow={openDetail} onNew={goNew} onRefresh={() => {}}/>;
+    body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} />;
     crumbs = ["已簽核完成"];
   } else if (route === "library") {
-    body = <LibraryPage/>;
+    body   = <LibraryPage />;
     crumbs = ["AI Agent 圖書館"];
   } else if (route === "assignment") {
-    body = <AssignmentPage/>;
+    body   = <AssignmentPage />;
     crumbs = ["派發中心人員設定"];
   } else if (route === "permissions") {
-    body = <PermissionsPage/>;
+    body   = <PermissionsPage />;
     crumbs = ["權限管理中心"];
   } else if (route === "detail" && currentBudget) {
-    body = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onEdit={goEdit}/>;
+    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onEdit={goEdit} />;
     crumbs = ["待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
-    body = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew}/>;
+    body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} />;
     crumbs = ["待簽核", currentBudget.id, "編輯"];
   } else if (route === "new") {
-    body = <EditPage budget={null} onBack={goList} onSave={saveNew}/>;
+    body   = <EditPage budget={null} onBack={goList} onSave={saveNew} />;
     crumbs = ["待簽核", "建立新預算單"];
   }
 
   return (
     <>
       <div className="app">
-        <Sidebar route={route} setRoute={(r) => { setRoute(r); }} pendingCount={pendingCount} width={sidebarW} onResize={setSidebarW}/>
+        <Sidebar route={route} setRoute={(r) => setRoute(r)} pendingCount={pendingCount} width={sidebarW} onResize={setSidebarW} user={user} />
         <div className="col-right">
-          <Topbar crumbs={crumbs} pendingCount={pendingCount}/>
+          <Topbar crumbs={crumbs} pendingCount={pendingCount} />
+          {apiError && (
+            <div style={{ padding: "8px 24px", background: "var(--bad-soft)", color: "oklch(0.45 0.18 22)", fontSize: 12, borderBottom: "1px solid oklch(0.6 0.2 22 / 0.2)" }}>
+              ⚠ {apiError}
+              <button onClick={() => setApiError(null)} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 600 }}>✕</button>
+            </div>
+          )}
           <main className={`main ${(route === "pending" || route === "approved") ? "fit" : ""}`}>{body}</main>
         </div>
       </div>
@@ -136,7 +198,7 @@ function App() {
             options={["#E85D5D", "#D946A0", "#7C5AE0", "#2BA8C7", "#0EA5A0", "#F59E0B"]}
             onChange={(v) => setTweak("accentColor", v)}
           />
-          <TweakToggle label="顯示背景網格" value={t.showGrid} onChange={(v) => setTweak("showGrid", v)}/>
+          <TweakToggle label="顯示背景網格" value={t.showGrid} onChange={(v) => setTweak("showGrid", v)} />
           <TweakRadio
             label="密度"
             value={t.density}
@@ -144,18 +206,16 @@ function App() {
             onChange={(v) => setTweak("density", v)}
           />
         </TweakSection>
-        <TweakSection label="Demo">
-          <TweakToggle label="預設已登入" value={t.preLoggedIn} onChange={(v) => setTweak("preLoggedIn", v)}/>
-          <TweakButton label="重新產生案件資料" onClick={() => { setBudgets(MOCK.generateBudgets()); setRoute("pending"); }}/>
-          <TweakButton label="回到登入頁" secondary onClick={() => { setUser(null); }}/>
+        <TweakSection label="Debug">
+          <TweakButton label="從資料庫重新整理" onClick={() => { loadBudgets(); setRoute("pending"); }} />
+          <TweakButton label="回到登入頁" secondary onClick={async () => { await API.logout().catch(() => {}); setUser(null); }} />
         </TweakSection>
       </TweaksPanel>
     </>
   );
 }
 
-// Density effect
 const densityStyle = document.createElement("style");
 document.head.appendChild(densityStyle);
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
