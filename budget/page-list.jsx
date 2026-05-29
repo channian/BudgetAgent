@@ -32,6 +32,36 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh }) {
   const [sort, setSort] = React.useState({ k: "dispatchDate", dir: "desc" });
   const [cols, setCols] = React.useState(DEFAULT_COLS);
 
+  // Export / import
+  const exportScope = isPending ? "pending" : "completed";
+  const fileRef = React.useRef(null);
+  const [busy, setBusy] = React.useState("");   // "" | "csv" | "xlsx" | "import"
+
+  const doExport = async (fmt) => {
+    setBusy(fmt);
+    try { await API.exportBudgets(exportScope, fmt); }
+    catch (e) { alert("匯出失敗：" + e.message); }
+    finally { setBusy(""); }
+  };
+
+  const doImport = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";   // allow re-selecting the same file
+    if (!file) return;
+    setBusy("import");
+    try {
+      const r = await API.importBudgets(file);
+      let msg = `匯入完成：新增/更新 ${r.inserted} 筆，略過 ${r.skipped} 筆。`;
+      if (r.errors && r.errors.length) msg += `\n錯誤 ${r.errors.length} 筆：\n` + r.errors.join("\n");
+      alert(msg);
+      onRefresh && onRefresh();
+    } catch (err) {
+      alert("匯入失敗：" + err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
   // Persist column widths
   const storeKey = `pensieve.cols.${scope}`;
   React.useEffect(() => {
@@ -124,7 +154,22 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh }) {
         </div>
         <div className="actions">
           <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
-          <button className="btn"><Icon.Download/>匯出 CSV</button>
+          <button className="btn" onClick={() => doExport("csv")} disabled={busy === "csv"}>
+            <Icon.Download/>{busy === "csv" ? "匯出中…" : "匯出 CSV"}
+          </button>
+          <button className="btn" onClick={() => doExport("xlsx")} disabled={busy === "xlsx"}>
+            <Icon.Download/>{busy === "xlsx" ? "匯出中…" : "匯出 XLSX"}
+          </button>
+          <button className="btn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy === "import"}>
+            <Icon.Upload/>{busy === "import" ? "匯入中…" : "匯入 CSV/XLSX"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,.xlsx"
+            style={{ display: "none" }}
+            onChange={doImport}
+          />
           {isPending && (
             <button className="btn accent" onClick={onNew}>
               <Icon.Plus/>建立預算單

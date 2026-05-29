@@ -65,8 +65,7 @@ function dbToFrontend(row) {
   const ai           = parseAiResult(row.ai_result);
   const expertResult = row.expert_decision === "通過" ? "approve"
                      : row.expert_decision === "退件" ? "reject" : null;
-  const ownerName    = row.owner_name || "";   // from LEFT JOIN users
-  const ownerDept    = row.owner_dept || "";
+  const ownerName    = row.owner || "";   // plain text column
 
   return {
     dbId:          row.jsondb_id,
@@ -78,7 +77,7 @@ function dbToFrontend(row) {
     categoryId:    CAT_NAME_TO_ID[row.category] || "IT",
     subCategory:   row.sub_category,
     expertName:    row.expert_name,
-    owner:         { id: row.owner_id, name: ownerName, dept: ownerDept, initial: ownerName.charAt(0) || "?" },
+    owner:         { name: ownerName, dept: "", initial: ownerName.charAt(0) || "?" },
     amount:        parseFloat(row.amount) || 0,
     aiResult:      ai.result,
     aiConfidence:  ai.confidence,
@@ -96,9 +95,6 @@ function dbToFrontend(row) {
 
 // ── Frontend form → DB payload ────────────────────────────────────────
 function frontendToDB(form) {
-  const catObj  = (window.MOCK?.CATEGORIES || []).find(c => c.id === form.categoryId);
-  const catName = catObj ? catObj.name : (form.categoryName || form.categoryId || "");
-
   let ai_result_obj = null;
   if (form.aiResult && form.aiResult !== "hold") {
     ai_result_obj = {
@@ -109,10 +105,10 @@ function frontendToDB(form) {
 
   return {
     project_name: form.project,
-    category:     catName,
+    category:     form.category || null,     // free text
     sub_category: form.subCategory || null,
     expert_name:  form.expertName  || null,
-    owner_id:     form.ownerId ? parseInt(form.ownerId, 10) : null,
+    owner:        form.owner || null,        // free text
     amount:       parseFloat(form.amount) || 0,
     ai_comment:   form.aiReason || null,
     ai_result_obj,
@@ -188,6 +184,41 @@ async function apiFetchUsers() {
   return d.users || [];
 }
 
+// ── Export / Import ───────────────────────────────────────────────────
+// Triggers a browser file download for the given scope + format (csv|xlsx)
+async function apiExportBudgets(scope = "pending", format = "csv") {
+  const res = await fetch(`${API_BASE}/api/budgets/export?scope=${scope}&format=${format}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const cd   = res.headers.get("Content-Disposition") || "";
+  const m    = cd.match(/filename="?([^"]+)"?/);
+  const fname = m ? m[1] : `budget_${scope}.${format}`;
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Uploads a CSV/XLSX file; returns { inserted, skipped, errors }
+async function apiImportBudgets(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${API_BASE}/api/budgets/import`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,   // let the browser set multipart boundary
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
 // ── Notifications ─────────────────────────────────────────────────────
 async function apiFetchNotifications() {
   const d = await apiFetch("/api/notifications");
@@ -210,6 +241,8 @@ window.API = {
   resubmit:            apiResubmitBudget,
   fetchTimeline:       apiFetchTimeline,
   fetchUsers:          apiFetchUsers,
+  exportBudgets:       apiExportBudgets,
+  importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
   // Utilities

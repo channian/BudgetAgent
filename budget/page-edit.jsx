@@ -3,22 +3,12 @@
 function EditPage({ budget, onBack, onSave, currentUser }) {
   const isNew = !budget;
 
-  const [dbUsers, setDbUsers] = React.useState([]);
-  React.useEffect(() => {
-    API.fetchUsers()
-      .then(setDbUsers)
-      .catch(() => setDbUsers([]));
-  }, []);
-
-  // Default ownerId: existing budget's owner, else current logged-in user
-  const defaultOwnerId = budget?.owner?.id || currentUser?.id || "";
-
   const [form, setForm] = React.useState(() => ({
     project:       budget?.project       || "",
-    categoryId:    budget?.categoryId    || "RD",
+    category:      budget?.category      || "",
     subCategory:   budget?.subCategory   || "",
     expertName:    budget?.expertName    || "",
-    ownerId:       defaultOwnerId,
+    owner:         budget?.owner?.name   || currentUser?.name || "",
     amount:        budget?.amount        || "",
     notes:         budget?.notes         || "",
     expertComment: budget?.expertComment || "",
@@ -31,7 +21,6 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
   const [jsonErr, setJsonErr]   = React.useState("");
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const cat = MOCK.CATEGORIES.find((c) => c.id === form.categoryId);
 
   const applyAiJson = () => {
     setJsonErr("");
@@ -43,17 +32,16 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
       const mapped = API.mapAiJsonPaste(j);
       if (!mapped || !mapped.aiResult) { setJsonErr("無法識別 JSON 格式，請確認欄位"); return; }
 
-      // If RPA JSON (Chinese keys), also fill project metadata fields
-      const catMatch = MOCK.CATEGORIES.find(c => c.name === mapped.categoryName);
+      // If RPA JSON (Chinese keys), also fill project metadata fields (free text)
       setForm(f => ({
         ...f,
         aiResult:     mapped.aiResult,
         aiConfidence: mapped.aiConfidence,
         aiReason:     mapped.aiReason,
-        ...(mapped.project     && { project:     mapped.project }),
-        ...(catMatch           && { categoryId:  catMatch.id }),
-        ...(mapped.subCategory && { subCategory: mapped.subCategory }),
-        ...(mapped.expertName  && { expertName:  mapped.expertName }),
+        ...(mapped.project      && { project:     mapped.project }),
+        ...(mapped.categoryName && { category:    mapped.categoryName }),
+        ...(mapped.subCategory  && { subCategory: mapped.subCategory }),
+        ...(mapped.expertName   && { expertName:  mapped.expertName }),
       }));
     } catch (e) {
       setJsonErr("JSON 格式錯誤：" + e.message);
@@ -65,7 +53,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
   const budgetNo = budget?.id || MOCK.nextDispatchNo([]);
   const cyc = budget?.signDate ? MOCK.cycleTime(dispatchDate, budget.signDate) : null;
 
-  const canSave = form.project && form.amount && form.aiResult;
+  const canSave = form.project && form.category && form.owner && form.amount;
 
   return (
     <>
@@ -109,27 +97,32 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
               <div className="field-row two" style={{ marginTop: 14 }}>
                 <div className="field">
                   <label>類別 <span className="req">*</span></label>
-                  <select value={form.categoryId} onChange={(e) => { set("categoryId", e.target.value); set("subCategory", ""); }}>
-                    {MOCK.CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.id} · {c.name}</option>)}
-                  </select>
+                  <input
+                    type="text"
+                    value={form.category}
+                    onChange={(e) => set("category", e.target.value)}
+                    placeholder="例：研發費用 / 資訊系統"
+                  />
                 </div>
                 <div className="field">
                   <label>判定類別 <span className="opt">(選填)</span></label>
-                  <select value={form.subCategory} onChange={(e) => set("subCategory", e.target.value)}>
-                    <option value="">— 未指定 —</option>
-                    {cat.sub.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  <input
+                    type="text"
+                    value={form.subCategory}
+                    onChange={(e) => set("subCategory", e.target.value)}
+                    placeholder="例：軟體授權"
+                  />
                 </div>
               </div>
               <div className="field-row two" style={{ marginTop: 14 }}>
                 <div className="field">
                   <label>預算負責人 <span className="req">*</span></label>
-                  <select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)}>
-                    {dbUsers.length === 0
-                      ? <option value="">載入中…</option>
-                      : dbUsers.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.department}</option>)
-                    }
-                  </select>
+                  <input
+                    type="text"
+                    value={form.owner}
+                    onChange={(e) => set("owner", e.target.value)}
+                    placeholder="輸入負責人姓名"
+                  />
                 </div>
                 <div className="field">
                   <label>金額 (NT$) <span className="req">*</span></label>
@@ -252,10 +245,10 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
             <div className="card-head"><h3>檢核提示 <span className="tag">CHECKS</span></h3></div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <CheckRow ok={!!form.project} label="已填寫項目名稱"/>
+              <CheckRow ok={!!form.category} label="已填寫類別"/>
               <CheckRow ok={!!form.amount && Number(form.amount) > 0} label="金額有效"/>
-              <CheckRow ok={!!form.ownerId} label="已指派預算負責人"/>
-              <CheckRow ok={!!form.aiResult} label="AI 初審結果已套用"/>
-              <CheckRow ok={!!form.expertResult} label="專家審核處置已選擇" warn/>
+              <CheckRow ok={!!form.owner} label="已填寫預算負責人"/>
+              <CheckRow ok={!!form.aiResult} label="AI 初審結果已套用 (選填)" warn/>
             </div>
           </div>
 

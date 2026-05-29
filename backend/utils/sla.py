@@ -12,9 +12,8 @@ def check_sla_violations():
             cur.execute(
                 """SELECT br.jsondb_id, br.status::text AS status,
                           br.expert_name, br.project_name,
-                          u.name AS owner_name
+                          br.owner AS owner_name
                    FROM budget.budget_requests br
-                   LEFT JOIN budget.users u ON u.id = br.owner_id
                    WHERE br.status::text = ANY(%s)
                      AND br.dispatch_date IS NOT NULL
                      AND br.dispatch_date < %s""",
