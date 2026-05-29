@@ -1,13 +1,24 @@
 /* Budget submission / edit page */
 
-function EditPage({ budget, onBack, onSave }) {
+function EditPage({ budget, onBack, onSave, currentUser }) {
   const isNew = !budget;
+
+  const [dbUsers, setDbUsers] = React.useState([]);
+  React.useEffect(() => {
+    API.fetchUsers()
+      .then(setDbUsers)
+      .catch(() => setDbUsers([]));
+  }, []);
+
+  // Default ownerId: existing budget's owner, else current logged-in user
+  const defaultOwnerId = budget?.owner?.id || currentUser?.id || "";
+
   const [form, setForm] = React.useState(() => ({
     project:       budget?.project       || "",
     categoryId:    budget?.categoryId    || "RD",
     subCategory:   budget?.subCategory   || "",
     expertName:    budget?.expertName    || "",
-    ownerId:       budget?.owner?.id     || MOCK.OWNERS[0].id,
+    ownerId:       defaultOwnerId,
     amount:        budget?.amount        || "",
     notes:         budget?.notes         || "",
     expertComment: budget?.expertComment || "",
@@ -17,7 +28,7 @@ function EditPage({ budget, onBack, onSave }) {
     aiReason:      budget?.aiReason      || "",
   }));
   const [jsonText, setJsonText] = React.useState("");
-  const [jsonErr, setJsonErr] = React.useState("");
+  const [jsonErr, setJsonErr]   = React.useState("");
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const cat = MOCK.CATEGORIES.find((c) => c.id === form.categoryId);
@@ -114,7 +125,10 @@ function EditPage({ budget, onBack, onSave }) {
                 <div className="field">
                   <label>預算負責人 <span className="req">*</span></label>
                   <select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)}>
-                    {MOCK.OWNERS.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.dept}</option>)}
+                    {dbUsers.length === 0
+                      ? <option value="">載入中…</option>
+                      : dbUsers.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.department}</option>)
+                    }
                   </select>
                 </div>
                 <div className="field">

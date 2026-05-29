@@ -60,8 +60,9 @@ def create_budget():
 
     _, iso_week, _ = datetime.datetime.now().isocalendar()
 
-    ai_obj = data.get("ai_result_obj")
-    status = "EXPERT_REVIEW" if ai_obj else "AI_REVIEW"
+    ai_obj   = data.get("ai_result_obj")
+    status   = "EXPERT_REVIEW" if ai_obj else "AI_REVIEW"
+    owner_id = data.get("owner_id") or user.get("id")
 
     try:
         with db_cursor(commit=True) as cur:
@@ -69,14 +70,7 @@ def create_budget():
                 """INSERT INTO budget.budget_requests
                        (project_name, week, category, sub_category, expert_name,
                         owner_id, amount, ai_comment, ai_result, status)
-                   VALUES (
-                       %s, %s, %s, %s, %s,
-                       COALESCE(
-                           (SELECT id FROM budget.users WHERE name = %s LIMIT 1),
-                           %s
-                       ),
-                       %s, %s, %s, %s
-                   )
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (project_name) DO UPDATE SET
                        week         = EXCLUDED.week,
                        category     = EXCLUDED.category,
@@ -94,8 +88,7 @@ def create_budget():
                     data.get("category"),
                     data.get("sub_category"),
                     data.get("expert_name"),
-                    data.get("owner"),       # name lookup
-                    user.get("id"),          # fallback to current user
+                    owner_id,
                     data.get("amount", 0),
                     data.get("ai_comment"),
                     PgJson(ai_obj) if ai_obj else None,
@@ -139,13 +132,10 @@ def update_budget(jsondb_id):
     data = request.json or {}
     user = current_user()
 
-    allowed = {"expert_name", "amount", "category", "sub_category", "note", "expert_comment"}
+    allowed = {"expert_name", "owner_id", "amount", "category", "sub_category", "note", "expert_comment"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return jsonify(error="無可更新欄位"), 400
-
-    # owner_id resolved separately if owner name provided
-    owner_name = data.get("owner")
 
     try:
         with db_cursor() as cur:
@@ -158,16 +148,8 @@ def update_budget(jsondb_id):
             return jsonify(error="案件不存在"), 404
         before = row_to_dict(before_row)
 
-        set_parts = [f"{k} = %s" for k in updates]
-        vals      = list(updates.values())
-
-        if owner_name:
-            set_parts.append(
-                "owner_id = COALESCE((SELECT id FROM budget.users WHERE name = %s LIMIT 1), owner_id)"
-            )
-            vals.append(owner_name)
-
-        set_clause = ", ".join(set_parts)
+        set_clause = ", ".join(f"{k} = %s" for k in updates)
+        vals       = list(updates.values())
         with db_cursor(commit=True) as cur:
             cur.execute(
                 f"UPDATE budget.budget_requests SET {set_clause} WHERE jsondb_id = %s RETURNING *",

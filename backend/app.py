@@ -5,6 +5,7 @@ from config import SECRET_KEY
 from routes.auth import auth_bp
 from routes.budgets import budgets_bp
 from routes.notifications import notifications_bp
+from routes.users import users_bp
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -14,6 +15,7 @@ CORS(app, supports_credentials=True)
 app.register_blueprint(auth_bp,          url_prefix="/api/auth")
 app.register_blueprint(budgets_bp,       url_prefix="/api")
 app.register_blueprint(notifications_bp, url_prefix="/api")
+app.register_blueprint(users_bp,         url_prefix="/api")
 
 # ── Serve frontend static files ───────────────────────────────────────
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "budget")

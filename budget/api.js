@@ -96,11 +96,8 @@ function dbToFrontend(row) {
 
 // ── Frontend form → DB payload ────────────────────────────────────────
 function frontendToDB(form) {
-  // Resolve category name from ID using MOCK.CATEGORIES
-  const catObj   = (window.MOCK?.CATEGORIES || []).find(c => c.id === form.categoryId);
-  const catName  = catObj ? catObj.name : (form.categoryName || form.categoryId || "");
-  const ownerObj = (window.MOCK?.OWNERS || []).find(o => o.id === form.ownerId);
-  const ownerName = ownerObj ? ownerObj.name : (form.ownerId || "");
+  const catObj  = (window.MOCK?.CATEGORIES || []).find(c => c.id === form.categoryId);
+  const catName = catObj ? catObj.name : (form.categoryName || form.categoryId || "");
 
   let ai_result_obj = null;
   if (form.aiResult && form.aiResult !== "hold") {
@@ -115,11 +112,11 @@ function frontendToDB(form) {
     category:     catName,
     sub_category: form.subCategory || null,
     expert_name:  form.expertName  || null,
-    owner:        ownerName,
+    owner_id:     form.ownerId ? parseInt(form.ownerId, 10) : null,
     amount:       parseFloat(form.amount) || 0,
-    ai_comment:   form.aiReason  || null,
+    ai_comment:   form.aiReason || null,
     ai_result_obj,
-    note:         form.notes     || null,
+    note:         form.notes    || null,
   };
 }
 
@@ -185,6 +182,12 @@ async function apiFetchTimeline(dbId) {
   return d.timeline || [];
 }
 
+// ── Users ─────────────────────────────────────────────────────────────
+async function apiFetchUsers() {
+  const d = await apiFetch("/api/users");
+  return d.users || [];
+}
+
 // ── Notifications ─────────────────────────────────────────────────────
 async function apiFetchNotifications() {
   const d = await apiFetch("/api/notifications");
@@ -206,6 +209,7 @@ window.API = {
   reject:              apiRejectBudget,
   resubmit:            apiResubmitBudget,
   fetchTimeline:       apiFetchTimeline,
+  fetchUsers:          apiFetchUsers,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
   // Utilities

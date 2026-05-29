@@ -167,10 +167,10 @@ function App() {
     body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onEdit={goEdit} />;
     crumbs = ["待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
-    body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} />;
+    body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id, "編輯"];
   } else if (route === "new") {
-    body   = <EditPage budget={null} onBack={goList} onSave={saveNew} />;
+    body   = <EditPage budget={null} onBack={goList} onSave={saveNew} currentUser={user} />;
     crumbs = ["待簽核", "建立新預算單"];
   }
 
