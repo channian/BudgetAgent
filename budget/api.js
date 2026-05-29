@@ -1,5 +1,5 @@
 /* API client + data mapper
- * Bridges the Flask backend (DB schema v1.2) and the React frontend.
+ * Bridges the Flask backend (DB schema v2.0) and the React frontend.
  */
 
 // 空字串 = 與前端同源（Flask 直接 serve），可用 window.API_BASE 覆寫
@@ -68,8 +68,8 @@ function dbToFrontend(row) {
   const ownerName    = row.owner || "";   // plain text column
 
   return {
-    dbId:          row.jsondb_id,
-    id:            row.budget_no || `#${row.jsondb_id}`,
+    dbId:          row.id,
+    id:            row.budget_no || `#${row.id}`,
     budgetNo:      row.budget_no,
     week:          row.week,
     project:       row.project_name,

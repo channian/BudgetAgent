@@ -1,4 +1,4 @@
-import json
+from psycopg2.extras import Json as PgJson
 from db import cursor as db_cursor
 
 
@@ -12,7 +12,7 @@ def log(request_id, action, operator, before=None, after=None):
                 request_id,
                 action,
                 operator,
-                json.dumps(before, default=str) if before is not None else None,
-                json.dumps(after,  default=str) if after  is not None else None,
+                PgJson(before) if before is not None else None,
+                PgJson(after)  if after  is not None else None,
             ),
         )

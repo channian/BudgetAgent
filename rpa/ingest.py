@@ -19,20 +19,18 @@ DB_CONFIG = {
     "options":  "-c search_path=budget",
 }
 
-# ai_result 是 JSONB 欄位；status / expert_decision 是 enum 欄位
+# ai_result 是 JSONB 欄位；status 是 VARCHAR CHECK 欄位（v2 schema）
 INSERT_SQL = """
     INSERT INTO budget.budget_requests
         (project_name, week, category, sub_category, expert_name,
          ai_comment, ai_result, status)
     VALUES (%s, %s, %s, %s, %s, %s, %s, 'AI_REVIEW')
     ON CONFLICT (project_name) DO UPDATE SET
-        week         = EXCLUDED.week,
-        category     = EXCLUDED.category,
         sub_category = EXCLUDED.sub_category,
         expert_name  = EXCLUDED.expert_name,
         ai_comment   = EXCLUDED.ai_comment,
         ai_result    = EXCLUDED.ai_result
-    RETURNING jsondb_id
+    RETURNING id
 """
 
 
@@ -78,9 +76,9 @@ def batch_process():
             ))
             conn.commit()
 
-            jsondb_id = cur.fetchone()[0]
+            budget_id = cur.fetchone()[0]
             move(file_path, os.path.join(BACKUP_DIR, file_name))
-            print(f"✅  jsondb_id={jsondb_id}  {data['案件名稱']}")
+            print(f"✅  id={budget_id}  {data['案件名稱']}")
             ok += 1
 
         except Exception as e:

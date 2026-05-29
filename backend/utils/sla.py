@@ -10,13 +10,11 @@ def check_sla_violations():
     try:
         with db_cursor() as cur:
             cur.execute(
-                """SELECT br.jsondb_id, br.status::text AS status,
-                          br.expert_name, br.project_name,
-                          br.owner AS owner_name
-                   FROM budget.budget_requests br
-                   WHERE br.status::text = ANY(%s)
-                     AND br.dispatch_date IS NOT NULL
-                     AND br.dispatch_date < %s""",
+                """SELECT id, status, expert_name, project_name, owner
+                   FROM budget.budget_requests
+                   WHERE status = ANY(%s)
+                     AND dispatch_date IS NOT NULL
+                     AND dispatch_date < %s""",
                 (["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"], threshold),
             )
             overdue = [dict(r) for r in cur.fetchall()]
@@ -28,7 +26,7 @@ def check_sla_violations():
 
 
 def _notify(row):
-    target_name = row.get("expert_name") or row.get("owner_name")
+    target_name = row.get("expert_name") or row.get("owner")
     if not target_name:
         return
 
@@ -49,21 +47,21 @@ def _notify(row):
                    WHERE user_id = %s
                      AND text LIKE %s
                      AND created_at > NOW() - INTERVAL '24 hours'""",
-                (user["id"], f"%#{row['jsondb_id']}%SLA%"),
+                (user["id"], f"%#{row['id']}%SLA%"),
             )
             if cur.fetchone():
                 return
 
         msg = (
-            f"[SLA 催辦] 案件「{row['project_name']}」(#{row['jsondb_id']}) "
+            f"[SLA 催辦] 案件「{row['project_name']}」(#{row['id']}) "
             f"已超過 {SLA_HOURS} 小時未更新，請盡速處理。"
         )
         with db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO budget.notifications (user_id, text, created_at) VALUES (%s, %s, NOW())",
+                "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
                 (user["id"], msg),
             )
 
-        audit_log(row["jsondb_id"], "SLA_REMINDER", "system", None, {"target": target_name})
+        audit_log(row["id"], "SLA_REMINDER", "system", None, {"target": target_name})
     except Exception:
         pass

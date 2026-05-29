@@ -30,7 +30,7 @@ def mark_read(notif_id):
     try:
         with db_cursor(commit=True) as cur:
             cur.execute(
-                "UPDATE budget.notifications SET read_at = NOW() WHERE notification_id = %s",
+                "UPDATE budget.notifications SET read_at = NOW() WHERE id = %s",
                 (notif_id,),
             )
     except Exception as e:
