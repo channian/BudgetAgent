@@ -15,17 +15,16 @@ const CAT_NAME_TO_ID = {
 };
 
 // ── ai_result JSON helpers ────────────────────────────────────────────
-function parseAiResult(str) {
-  if (!str) return { result: "hold", confidence: 0 };
-  try {
-    const obj  = JSON.parse(str);
-    const dec  = obj["AI處置結果"];
-    const conf = obj["保留案件的信心分數"] ?? 0;
-    const result = dec === "通過" ? "approve" : dec === "退件" ? "reject" : "hold";
-    return { result, confidence: conf };
-  } catch {
-    return { result: "hold", confidence: 0 };
-  }
+// JSONB columns come back from psycopg2 as objects, not strings
+function parseAiResult(val) {
+  if (!val) return { result: "hold", confidence: 0 };
+  const obj = (typeof val === "string")
+    ? (() => { try { return JSON.parse(val); } catch { return {}; } })()
+    : val;
+  const dec  = obj["AI處置結果"];
+  const conf = obj["保留案件的信心分數"] ?? 0;
+  const result = dec === "通過" ? "approve" : dec === "退件" ? "reject" : "hold";
+  return { result, confidence: conf };
 }
 
 // Supports both English keys (demo sample) and Chinese keys (real RPA JSON)
@@ -66,12 +65,12 @@ function dbToFrontend(row) {
   const ai           = parseAiResult(row.ai_result);
   const expertResult = row.expert_decision === "通過" ? "approve"
                      : row.expert_decision === "退件" ? "reject" : null;
-  const ownerName    = row.owner || "";
+  const ownerName    = row.owner_name || "";   // from LEFT JOIN users
   const ownerDept    = row.owner_dept || "";
 
   return {
-    dbId:          row.db_id,
-    id:            row.budget_no || `#${row.db_id}`,
+    dbId:          row.jsondb_id,
+    id:            row.budget_no || `#${row.jsondb_id}`,
     budgetNo:      row.budget_no,
     week:          row.week,
     project:       row.project_name,
@@ -79,7 +78,7 @@ function dbToFrontend(row) {
     categoryId:    CAT_NAME_TO_ID[row.category] || "IT",
     subCategory:   row.sub_category,
     expertName:    row.expert_name,
-    owner:         { id: ownerName, name: ownerName, dept: ownerDept, initial: ownerName.charAt(0) || "?" },
+    owner:         { id: row.owner_id, name: ownerName, dept: ownerDept, initial: ownerName.charAt(0) || "?" },
     amount:        parseFloat(row.amount) || 0,
     aiResult:      ai.result,
     aiConfidence:  ai.confidence,
@@ -87,11 +86,11 @@ function dbToFrontend(row) {
     expertResult,
     expertComment: row.expert_comment || "",
     status:        row.status,
-    dispatchDate:  row.dispatch_date ? new Date(row.dispatch_date) : new Date(row.updated_at),
+    dispatchDate:  row.dispatch_date ? new Date(row.dispatch_date) : new Date(),
     signDate:      row.sign_date ? new Date(row.sign_date) : null,
     cycleTime:     row.cycle_time,
     notes:         row.note || "",
-    updatedAt:     row.updated_at ? new Date(row.updated_at) : null,
+    updatedAt:     row.dispatch_date ? new Date(row.dispatch_date) : null,
   };
 }
 

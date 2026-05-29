@@ -1,5 +1,6 @@
 import json, datetime
 from flask import Blueprint, request, jsonify
+from psycopg2.extras import Json as PgJson
 from db import cursor as db_cursor, row_to_dict
 from utils.audit import log as audit_log
 from routes.auth import require_auth, current_user
@@ -19,15 +20,15 @@ def list_budgets():
     category = request.args.get("category", "").strip()
 
     statuses = PENDING_STATUSES if scope == "pending" else COMPLETED_STATUSES
-    conditions = ["br.status = ANY(%s)"]
+    conditions = ["br.status::text = ANY(%s)"]
     params     = [statuses]
 
     if q:
         conditions.append(
-            "(br.project_name ILIKE %s OR br.owner ILIKE %s OR br.budget_no ILIKE %s)"
+            "(br.project_name ILIKE %s OR br.budget_no ILIKE %s)"
         )
         like = f"%{q}%"
-        params += [like, like, like]
+        params += [like, like]
     if category:
         conditions.append("br.category = %s")
         params.append(category)
@@ -36,11 +37,11 @@ def list_budgets():
     try:
         with db_cursor() as cur:
             cur.execute(
-                f"""SELECT br.*, u.department AS owner_dept
+                f"""SELECT br.*, u.name AS owner_name, u.department AS owner_dept
                     FROM budget.budget_requests br
-                    LEFT JOIN budget.users u ON u.name = br.owner
+                    LEFT JOIN budget.users u ON u.id = br.owner_id
                     WHERE {where}
-                    ORDER BY br.updated_at DESC""",
+                    ORDER BY br.jsondb_id DESC""",
                 params,
             )
             rows = [row_to_dict(r) for r in cur.fetchall()]
@@ -60,7 +61,6 @@ def create_budget():
     _, iso_week, _ = datetime.datetime.now().isocalendar()
 
     ai_obj = data.get("ai_result_obj")
-    ai_str = json.dumps(ai_obj, ensure_ascii=False) if ai_obj else None
     status = "EXPERT_REVIEW" if ai_obj else "AI_REVIEW"
 
     try:
@@ -68,53 +68,60 @@ def create_budget():
             cur.execute(
                 """INSERT INTO budget.budget_requests
                        (project_name, week, category, sub_category, expert_name,
-                        owner, amount, ai_comment, ai_result, status, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        owner_id, amount, ai_comment, ai_result, status)
+                   VALUES (
+                       %s, %s, %s, %s, %s,
+                       COALESCE(
+                           (SELECT id FROM budget.users WHERE name = %s LIMIT 1),
+                           %s
+                       ),
+                       %s, %s, %s, %s
+                   )
                    ON CONFLICT (project_name) DO UPDATE SET
                        week         = EXCLUDED.week,
                        category     = EXCLUDED.category,
                        sub_category = EXCLUDED.sub_category,
                        expert_name  = EXCLUDED.expert_name,
-                       owner        = EXCLUDED.owner,
+                       owner_id     = EXCLUDED.owner_id,
                        amount       = EXCLUDED.amount,
                        ai_comment   = EXCLUDED.ai_comment,
                        ai_result    = EXCLUDED.ai_result,
-                       status       = EXCLUDED.status,
-                       updated_at   = NOW()
-                   RETURNING db_id""",
+                       status       = EXCLUDED.status
+                   RETURNING jsondb_id""",
                 (
                     data.get("project_name"),
                     iso_week,
                     data.get("category"),
                     data.get("sub_category"),
                     data.get("expert_name"),
-                    data.get("owner", user.get("name", "")),
+                    data.get("owner"),       # name lookup
+                    user.get("id"),          # fallback to current user
                     data.get("amount", 0),
                     data.get("ai_comment"),
-                    ai_str,
+                    PgJson(ai_obj) if ai_obj else None,
                     status,
                 ),
             )
-            db_id = cur.fetchone()["db_id"]
+            jsondb_id = cur.fetchone()["jsondb_id"]
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-    audit_log(db_id, "CREATE", user.get("name", "system"), None, data)
-    return jsonify(db_id=db_id, status=status), 201
+    audit_log(jsondb_id, "CREATE", user.get("name", "system"), None, data)
+    return jsonify(jsondb_id=jsondb_id, status=status), 201
 
 
 # ── Get single ────────────────────────────────────────────────────────
-@budgets_bp.get("/budgets/<int:db_id>")
+@budgets_bp.get("/budgets/<int:jsondb_id>")
 @require_auth
-def get_budget(db_id):
+def get_budget(jsondb_id):
     try:
         with db_cursor() as cur:
             cur.execute(
-                """SELECT br.*, u.department AS owner_dept
+                """SELECT br.*, u.name AS owner_name, u.department AS owner_dept
                    FROM budget.budget_requests br
-                   LEFT JOIN budget.users u ON u.name = br.owner
-                   WHERE br.db_id = %s""",
-                (db_id,),
+                   LEFT JOIN budget.users u ON u.id = br.owner_id
+                   WHERE br.jsondb_id = %s""",
+                (jsondb_id,),
             )
             row = cur.fetchone()
     except Exception as e:
@@ -126,50 +133,68 @@ def get_budget(db_id):
 
 
 # ── Update (general fields) ───────────────────────────────────────────
-@budgets_bp.put("/budgets/<int:db_id>")
+@budgets_bp.put("/budgets/<int:jsondb_id>")
 @require_auth
-def update_budget(db_id):
+def update_budget(jsondb_id):
     data = request.json or {}
     user = current_user()
 
-    allowed = {"expert_name", "owner", "amount", "category", "sub_category", "note", "expert_comment"}
+    allowed = {"expert_name", "amount", "category", "sub_category", "note", "expert_comment"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return jsonify(error="無可更新欄位"), 400
 
+    # owner_id resolved separately if owner name provided
+    owner_name = data.get("owner")
+
     try:
         with db_cursor() as cur:
-            cur.execute("SELECT * FROM budget.budget_requests WHERE db_id = %s", (db_id,))
+            cur.execute(
+                "SELECT * FROM budget.budget_requests WHERE jsondb_id = %s",
+                (jsondb_id,),
+            )
             before_row = cur.fetchone()
         if not before_row:
             return jsonify(error="案件不存在"), 404
         before = row_to_dict(before_row)
 
-        set_clause = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = NOW()"
+        set_parts = [f"{k} = %s" for k in updates]
+        vals      = list(updates.values())
+
+        if owner_name:
+            set_parts.append(
+                "owner_id = COALESCE((SELECT id FROM budget.users WHERE name = %s LIMIT 1), owner_id)"
+            )
+            vals.append(owner_name)
+
+        set_clause = ", ".join(set_parts)
         with db_cursor(commit=True) as cur:
             cur.execute(
-                f"UPDATE budget.budget_requests SET {set_clause} WHERE db_id = %s RETURNING *",
-                [*updates.values(), db_id],
+                f"UPDATE budget.budget_requests SET {set_clause} WHERE jsondb_id = %s RETURNING *",
+                [*vals, jsondb_id],
             )
             after = row_to_dict(cur.fetchone())
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-    audit_log(db_id, "UPDATE", user.get("name", "system"), before, after)
+    audit_log(jsondb_id, "UPDATE", user.get("name", "system"), before, after)
     return jsonify(budget=after)
 
 
 # ── Approve (CLOSED) ──────────────────────────────────────────────────
-@budgets_bp.post("/budgets/<int:db_id>/approve")
+@budgets_bp.post("/budgets/<int:jsondb_id>/approve")
 @require_auth
-def approve_budget(db_id):
+def approve_budget(jsondb_id):
     data    = request.json or {}
     user    = current_user()
     comment = data.get("comment", "")
 
     try:
         with db_cursor() as cur:
-            cur.execute("SELECT * FROM budget.budget_requests WHERE db_id = %s", (db_id,))
+            cur.execute(
+                "SELECT * FROM budget.budget_requests WHERE jsondb_id = %s",
+                (jsondb_id,),
+            )
             before_row = cur.fetchone()
         if not before_row:
             return jsonify(error="案件不存在"), 404
@@ -185,39 +210,38 @@ def approve_budget(db_id):
                        sign_date       = NOW(),
                        cycle_time      = CASE
                            WHEN dispatch_date IS NOT NULL
-                           THEN EXTRACT(DAY FROM (NOW() - dispatch_date))::INT
+                           THEN EXTRACT(DAY FROM (NOW() - dispatch_date))
                            ELSE NULL
                        END,
-                       status          = 'CLOSED',
-                       updated_at      = NOW()
-                   WHERE db_id = %s
+                       status          = 'CLOSED'
+                   WHERE jsondb_id = %s
                    RETURNING *""",
-                (comment, db_id),
+                (comment, jsondb_id),
             )
             after = row_to_dict(cur.fetchone())
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-    audit_log(db_id, "APPROVE", user.get("name", "system"), before, after)
+    audit_log(jsondb_id, "APPROVE", user.get("name", "system"), before, after)
     return jsonify(budget=after)
 
 
-# ── Reject ─────────────────────────────────────────────────────────────
-# final=False → PENDING_ACTION (return for supplement)
-# final=True  → REJECTED (terminal)
-@budgets_bp.post("/budgets/<int:db_id>/reject")
+# ── Reject ────────────────────────────────────────────────────────────
+@budgets_bp.post("/budgets/<int:jsondb_id>/reject")
 @require_auth
-def reject_budget(db_id):
-    data    = request.json or {}
-    user    = current_user()
-    comment = data.get("comment", "")
-    final   = bool(data.get("final", False))
-
+def reject_budget(jsondb_id):
+    data       = request.json or {}
+    user       = current_user()
+    comment    = data.get("comment", "")
+    final      = bool(data.get("final", False))
     new_status = "REJECTED" if final else "PENDING_ACTION"
 
     try:
         with db_cursor() as cur:
-            cur.execute("SELECT * FROM budget.budget_requests WHERE db_id = %s", (db_id,))
+            cur.execute(
+                "SELECT * FROM budget.budget_requests WHERE jsondb_id = %s",
+                (jsondb_id,),
+            )
             before_row = cur.fetchone()
         if not before_row:
             return jsonify(error="案件不存在"), 404
@@ -229,30 +253,32 @@ def reject_budget(db_id):
                    SET expert_decision = '退件',
                        expert_comment  = %s,
                        sign_date       = CASE WHEN %s THEN NOW() ELSE sign_date END,
-                       status          = %s,
-                       updated_at      = NOW()
-                   WHERE db_id = %s
+                       status          = %s
+                   WHERE jsondb_id = %s
                    RETURNING *""",
-                (comment, final, new_status, db_id),
+                (comment, final, new_status, jsondb_id),
             )
             after = row_to_dict(cur.fetchone())
     except Exception as e:
         return jsonify(error=str(e)), 500
 
     action = "REJECT_FINAL" if final else "RETURN_FOR_SUPPLEMENT"
-    audit_log(db_id, action, user.get("name", "system"), before, after)
+    audit_log(jsondb_id, action, user.get("name", "system"), before, after)
     return jsonify(budget=after)
 
 
-# ── Resubmit (PENDING_ACTION → EXPERT_REVIEW) ─────────────────────────
-@budgets_bp.post("/budgets/<int:db_id>/resubmit")
+# ── Resubmit ──────────────────────────────────────────────────────────
+@budgets_bp.post("/budgets/<int:jsondb_id>/resubmit")
 @require_auth
-def resubmit_budget(db_id):
+def resubmit_budget(jsondb_id):
     user = current_user()
 
     try:
         with db_cursor() as cur:
-            cur.execute("SELECT * FROM budget.budget_requests WHERE db_id = %s", (db_id,))
+            cur.execute(
+                "SELECT * FROM budget.budget_requests WHERE jsondb_id = %s",
+                (jsondb_id,),
+            )
             before_row = cur.fetchone()
         if not before_row:
             return jsonify(error="案件不存在"), 404
@@ -265,24 +291,23 @@ def resubmit_budget(db_id):
                 """UPDATE budget.budget_requests
                    SET status          = 'EXPERT_REVIEW',
                        expert_decision = NULL,
-                       expert_comment  = NULL,
-                       updated_at      = NOW()
-                   WHERE db_id = %s
+                       expert_comment  = NULL
+                   WHERE jsondb_id = %s
                    RETURNING *""",
-                (db_id,),
+                (jsondb_id,),
             )
             after = row_to_dict(cur.fetchone())
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-    audit_log(db_id, "RESUBMIT", user.get("name", "system"), before, after)
+    audit_log(jsondb_id, "RESUBMIT", user.get("name", "system"), before, after)
     return jsonify(budget=after)
 
 
 # ── Timeline ──────────────────────────────────────────────────────────
-@budgets_bp.get("/budgets/<int:db_id>/timeline")
+@budgets_bp.get("/budgets/<int:jsondb_id>/timeline")
 @require_auth
-def get_timeline(db_id):
+def get_timeline(jsondb_id):
     try:
         with db_cursor() as cur:
             cur.execute(
@@ -290,7 +315,7 @@ def get_timeline(db_id):
                    FROM budget.audit_logs
                    WHERE request_id = %s
                    ORDER BY timestamp ASC""",
-                (db_id,),
+                (jsondb_id,),
             )
             rows = [row_to_dict(r) for r in cur.fetchall()]
     except Exception as e:

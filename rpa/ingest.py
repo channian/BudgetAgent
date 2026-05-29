@@ -1,10 +1,10 @@
 """
-RPA 批次進件腳本 — 對應 DB schema v1.2
+RPA 批次進件腳本 — 對應實際 DB schema
 掃描 INPUT_DIR 內的 JSON 檔，寫入 budget.budget_requests，完成後移至 BACKUP_DIR。
 """
 
 import os, json, datetime
-import psycopg2
+import psycopg2, psycopg2.extras
 from shutil import move
 
 INPUT_DIR  = r"D:\AS\2026\預算AI Agent\新思路0409\系統flask\A1初步預算"
@@ -19,21 +19,20 @@ DB_CONFIG = {
     "options":  "-c search_path=budget",
 }
 
-# 完整對應計畫書 v1.2 欄位
+# ai_result 是 JSONB 欄位；status / expert_decision 是 enum 欄位
 INSERT_SQL = """
     INSERT INTO budget.budget_requests
         (project_name, week, category, sub_category, expert_name,
-         ai_comment, ai_result, status, updated_at)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, 'AI_REVIEW', NOW())
+         ai_comment, ai_result, status)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, 'AI_REVIEW')
     ON CONFLICT (project_name) DO UPDATE SET
         week         = EXCLUDED.week,
         category     = EXCLUDED.category,
         sub_category = EXCLUDED.sub_category,
         expert_name  = EXCLUDED.expert_name,
         ai_comment   = EXCLUDED.ai_comment,
-        ai_result    = EXCLUDED.ai_result,
-        updated_at   = NOW()
-    RETURNING db_id
+        ai_result    = EXCLUDED.ai_result
+    RETURNING jsondb_id
 """
 
 
@@ -62,32 +61,26 @@ def batch_process():
 
             _, iso_week, _ = datetime.datetime.now().isocalendar()
 
-            # 封裝 AI 處置結果 JSON 欄位
-            ai_result = json.dumps(
-                {
-                    "AI處置結果":       data.get("最終決策"),
-                    "保留案件的信心分數": data.get("AI對於保留案件的信心分數"),
-                },
-                ensure_ascii=False,
-            )
+            # ai_result 存成 JSONB，使用 psycopg2.extras.Json 包裝
+            ai_result = psycopg2.extras.Json({
+                "AI處置結果":       data.get("最終決策"),
+                "保留案件的信心分數": data.get("AI對於保留案件的信心分數"),
+            })
 
-            cur.execute(
-                INSERT_SQL,
-                (
-                    data["案件名稱"],
-                    iso_week,
-                    data.get("判定類別"),
-                    data.get("判定系統"),
-                    data.get("負責專家"),
-                    data.get("原因", ""),
-                    ai_result,
-                ),
-            )
+            cur.execute(INSERT_SQL, (
+                data["案件名稱"],
+                iso_week,
+                data.get("判定類別"),
+                data.get("判定系統"),
+                data.get("負責專家"),
+                data.get("原因", ""),
+                ai_result,
+            ))
             conn.commit()
 
-            db_id = cur.fetchone()[0]
+            jsondb_id = cur.fetchone()[0]
             move(file_path, os.path.join(BACKUP_DIR, file_name))
-            print(f"✅  db_id={db_id}  {data['案件名稱']}")
+            print(f"✅  jsondb_id={jsondb_id}  {data['案件名稱']}")
             ok += 1
 
         except Exception as e:
