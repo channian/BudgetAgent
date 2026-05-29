@@ -1,4 +1,5 @@
-from flask import Flask
+import os
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 from config import SECRET_KEY
 from routes.auth import auth_bp
@@ -8,16 +9,22 @@ from routes.notifications import notifications_bp
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-# Allow the static frontend (opened as file://) and common dev origins
-CORS(
-    app,
-    supports_credentials=True,
-    origins=["http://localhost:3000", "http://127.0.0.1:3000", "null", ""],
-)
+CORS(app, supports_credentials=True)
 
-app.register_blueprint(auth_bp,           url_prefix="/api/auth")
-app.register_blueprint(budgets_bp,        url_prefix="/api")
-app.register_blueprint(notifications_bp,  url_prefix="/api")
+app.register_blueprint(auth_bp,          url_prefix="/api/auth")
+app.register_blueprint(budgets_bp,       url_prefix="/api")
+app.register_blueprint(notifications_bp, url_prefix="/api")
+
+# ── Serve frontend static files ───────────────────────────────────────
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "budget")
+
+@app.route("/")
+def index():
+    return send_from_directory(FRONTEND_DIR, "AI Agent 預算審核平台.html")
+
+@app.route("/<path:filename>")
+def static_files(filename):
+    return send_from_directory(FRONTEND_DIR, filename)
 
 
 # ── SLA scheduler ────────────────────────────────────────────────────

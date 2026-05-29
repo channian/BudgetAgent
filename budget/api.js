@@ -2,7 +2,8 @@
  * Bridges the Flask backend (DB schema v1.2) and the React frontend.
  */
 
-const API_BASE = window.API_BASE || "http://localhost:5000";
+// 空字串 = 與前端同源（Flask 直接 serve），可用 window.API_BASE 覆寫
+const API_BASE = window.API_BASE !== undefined ? window.API_BASE : "";
 
 // ── Category name ↔ frontend colour ID ───────────────────────────────
 const CAT_NAME_TO_ID = {
