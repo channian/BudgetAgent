@@ -1,6 +1,6 @@
 from functools import wraps
 from flask import Blueprint, request, jsonify, session
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from db import cursor as db_cursor, row_to_dict
 
 auth_bp = Blueprint("auth", __name__)
@@ -72,4 +72,28 @@ def me():
     if not user:
         return jsonify(error="未登入"), 401
     return jsonify(user=_safe(user))
+
+
+@auth_bp.put("/me/password")
+@require_auth
+def change_my_password():
+    """Any logged-in user can replace their own password."""
+    user     = current_user()
+    data     = request.json or {}
+    new_pass = (data.get("password") or "").strip()
+
+    if not new_pass:
+        return jsonify(error="密碼不得為空"), 400
+
+    hashed = generate_password_hash(new_pass)
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                "UPDATE budget.users SET password = %s WHERE id = %s",
+                (hashed, user["id"]),
+            )
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    return jsonify(ok=True)
 

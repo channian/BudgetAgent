@@ -143,6 +143,12 @@ async function apiMe() {
   const d = await apiFetch("/api/auth/me");
   return d.user;
 }
+async function apiChangeMyPassword(newPassword) {
+  await apiFetch("/api/auth/me/password", {
+    method: "PUT",
+    body: JSON.stringify({ password: newPassword }),
+  });
+}
 
 // ── Budgets ───────────────────────────────────────────────────────────
 async function apiFetchBudgets(scope = "pending", filters = {}) {
@@ -243,6 +249,7 @@ window.API = {
   login:               apiLogin,
   logout:              apiLogout,
   me:                  apiMe,
+  changeMyPassword:    apiChangeMyPassword,
   fetchBudgets:        apiFetchBudgets,
   fetchBudget:         apiFetchBudget,
   createBudget:        apiCreateBudget,

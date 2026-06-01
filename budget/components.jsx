@@ -159,6 +159,32 @@ function fmtAmount(n) {
 function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
   const role = user?.role || "viewer";
 
+  // Change-password modal
+  const [pwdOpen,  setPwdOpen]  = React.useState(false);
+  const [pwd1,     setPwd1]     = React.useState("");
+  const [pwd2,     setPwd2]     = React.useState("");
+  const [pwdErr,   setPwdErr]   = React.useState("");
+  const [pwdOk,    setPwdOk]    = React.useState(false);
+  const [pwdBusy,  setPwdBusy]  = React.useState(false);
+
+  const openPwd = () => { setPwd1(""); setPwd2(""); setPwdErr(""); setPwdOk(false); setPwdOpen(true); };
+  const closePwd = () => setPwdOpen(false);
+
+  const submitPwd = async () => {
+    if (!pwd1) { setPwdErr("請輸入新密碼"); return; }
+    if (pwd1 !== pwd2) { setPwdErr("兩次輸入不一致"); return; }
+    setPwdBusy(true); setPwdErr("");
+    try {
+      await API.changeMyPassword(pwd1);
+      setPwdOk(true);
+      setTimeout(closePwd, 1500);
+    } catch (e) {
+      setPwdErr(e.message);
+    } finally {
+      setPwdBusy(false);
+    }
+  };
+
   const allItems = [
     { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,  count: pendingCount, dot: true,  roles: ["admin","expert","viewer"] },
     { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                        roles: ["admin","expert","viewer"] },
@@ -221,10 +247,12 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
         })}
       </nav>
       <div className="sidebar-foot">
-        <div className="avatar">{user?.name?.charAt(0) || "?"}</div>
+        <div className="avatar" style={{ cursor: "pointer" }} title="修改密碼" onClick={openPwd}>
+          {user?.name?.charAt(0) || "?"}
+        </div>
         {!narrow &&
         <>
-            <div className="who">
+            <div className="who" style={{ cursor: "pointer" }} onClick={openPwd} title="修改密碼">
               <div className="n">{user?.name || "—"}</div>
               <div className="r">{role} · {user?.department || ""}</div>
             </div>
@@ -240,7 +268,35 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
         onMouseDown={onMouseDown}
         onDoubleClick={() => onResize(240)}
         title="拖曳調整寬度，雙擊重設" />
-      
+
+      {/* ── Change-password modal ── */}
+      {pwdOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 300, display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && closePwd()}>
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, width: 320, maxWidth: "92vw", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ fontSize: 15 }}>修改密碼</strong>
+              <button className="btn ghost sm" onClick={closePwd}>✕</button>
+            </div>
+            <div className="field">
+              <label>新密碼</label>
+              <input type="password" value={pwd1} onChange={e => setPwd1(e.target.value)}
+                placeholder="輸入新密碼（支援英數及符號）" autoFocus/>
+            </div>
+            <div className="field">
+              <label>確認新密碼</label>
+              <input type="password" value={pwd2} onChange={e => setPwd2(e.target.value)}
+                placeholder="再次輸入確認"
+                onKeyDown={e => e.key === "Enter" && submitPwd()}/>
+            </div>
+            {pwdErr && <div style={{ color: "var(--bad)", fontSize: 12 }}>⚠ {pwdErr}</div>}
+            {pwdOk  && <div style={{ color: "var(--ok)",  fontSize: 12 }}>✅ 密碼已更新！</div>}
+            <button className="btn primary" onClick={submitPwd} disabled={pwdBusy}>
+              {pwdBusy ? "更新中…" : "確認修改"}
+            </button>
+          </div>
+        </div>
+      )}
     </aside>);
 
 }
