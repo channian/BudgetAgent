@@ -1,5 +1,6 @@
 from functools import wraps
 from flask import Blueprint, request, jsonify, session
+from werkzeug.security import generate_password_hash, check_password_hash
 from db import cursor as db_cursor, row_to_dict
 
 auth_bp = Blueprint("auth", __name__)
@@ -26,7 +27,7 @@ def require_auth(f):
 
 @auth_bp.post("/login")
 def login():
-    data = request.json or {}
+    data       = request.json or {}
     ad_account = (data.get("username") or "").strip()
     password   = (data.get("password") or "").strip()
 
@@ -46,7 +47,15 @@ def login():
     if not row:
         return jsonify(error="帳號不存在，請聯繫系統管理員"), 401
 
-    user = row_to_dict(row)
+    user        = row_to_dict(row)
+    stored_hash = user.get("password") or ""
+
+    if not stored_hash:
+        return jsonify(error="此帳號尚未設定密碼，請聯繫系統管理員"), 401
+
+    if not check_password_hash(stored_hash, password):
+        return jsonify(error="密碼錯誤"), 401
+
     session["user"] = user
     return jsonify(user=_safe(user))
 
@@ -63,3 +72,30 @@ def me():
     if not user:
         return jsonify(error="未登入"), 401
     return jsonify(user=_safe(user))
+
+
+# ── Password management (admin only) ─────────────────────────────────
+@auth_bp.put("/users/<int:user_id>/password")
+@require_auth
+def set_password(user_id):
+    """Admin sets or resets a user's password. Accepts any characters: *, &, @, etc."""
+    caller = current_user()
+    if caller.get("role") != "admin":
+        return jsonify(error="僅系統管理員可設定密碼"), 403
+
+    data     = request.json or {}
+    new_pass = data.get("password", "")
+    if not new_pass:
+        return jsonify(error="密碼不得為空"), 400
+
+    hashed = generate_password_hash(new_pass)
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                "UPDATE budget.users SET password = %s WHERE id = %s",
+                (hashed, user_id),
+            )
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    return jsonify(ok=True)

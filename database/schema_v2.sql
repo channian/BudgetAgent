@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS budget.users (
     name        VARCHAR(100) NOT NULL,
     department  VARCHAR(100),
     ad_account  VARCHAR(100) NOT NULL UNIQUE,
+    password    VARCHAR(255) NOT NULL DEFAULT '',        -- werkzeug pbkdf2 雜湊；銜接 AD 後可留空
     role        VARCHAR(20)  NOT NULL DEFAULT 'viewer'
                     CHECK (role IN ('admin', 'expert', 'owner', 'viewer')),
     email       VARCHAR(200),
@@ -36,7 +37,8 @@ COMMENT ON TABLE  budget.users IS '系統使用者，對應 Windows AD 帳號';
 COMMENT ON COLUMN budget.users.id         IS '自增主鍵';
 COMMENT ON COLUMN budget.users.name       IS '顯示名稱（中文姓名）';
 COMMENT ON COLUMN budget.users.department IS '所屬部門';
-COMMENT ON COLUMN budget.users.ad_account IS 'Windows AD 登入帳號（唯一）';
+COMMENT ON COLUMN budget.users.ad_account IS '登入帳號（Windows AD 帳號，唯一）；支援中英文、數字及特殊符號（@、*、& 等）';
+COMMENT ON COLUMN budget.users.password   IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
 COMMENT ON COLUMN budget.users.role       IS 'admin=系統管理員 | expert=專家複審 | owner=預算負責人 | viewer=唯讀';
 COMMENT ON COLUMN budget.users.email      IS '電子郵件（選填）';
 
@@ -174,15 +176,27 @@ CREATE INDEX IF NOT EXISTS idx_notif_user_unread
 
 
 -- ══════════════════════════════════════════════════════════════════════════
+-- 既有資料庫升級（已有 budget.users 但尚無 password 欄位時執行）
+-- 新建資料庫可略過此段
+-- ══════════════════════════════════════════════════════════════════════════
+ALTER TABLE budget.users
+    ADD COLUMN IF NOT EXISTS password VARCHAR(255) NOT NULL DEFAULT '';
+
+COMMENT ON COLUMN budget.users.password IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
+
+
+-- ══════════════════════════════════════════════════════════════════════════
 -- 初始測試帳號（視需要取消註解執行）
--- 密碼欄位由 Windows AD 管理，此處任何密碼皆可登入（AD 尚未串接）
+-- 密碼請先以 Python 產生雜湊後填入，或執行下方 set_password.py 工具
 -- ══════════════════════════════════════════════════════════════════════════
 /*
-INSERT INTO budget.users (name, department, ad_account, role, email) VALUES
-    ('系統管理員',  'IT 部門',  'admin',    'admin',  'admin@ase.com'),
-    ('張專家',      '審核部門', 'expert01', 'expert', 'expert01@ase.com'),
-    ('林負責人',    '研發處',   'owner01',  'owner',  'owner01@ase.com'),
-    ('陳檢視者',    '財務部',   'viewer01', 'viewer', 'viewer01@ase.com')
+-- 注意：password 欄位需填入 werkzeug 雜湊值，不可直接填明文。
+-- 請先執行 database/set_password.py 產生雜湊，再 INSERT。
+INSERT INTO budget.users (name, department, ad_account, password, role, email) VALUES
+    ('系統管理員',  'IT 部門',  'admin',    '<hash>', 'admin',  'admin@ase.com'),
+    ('張專家',      '審核部門', 'expert01', '<hash>', 'expert', 'expert01@ase.com'),
+    ('林負責人',    '研發處',   'owner01',  '<hash>', 'owner',  'owner01@ase.com'),
+    ('陳檢視者',    '財務部',   'viewer01', '<hash>', 'viewer', 'viewer01@ase.com')
 ON CONFLICT (ad_account) DO NOTHING;
 */
 
