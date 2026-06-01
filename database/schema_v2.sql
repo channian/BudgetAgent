@@ -104,6 +104,7 @@ COMMENT ON COLUMN budget.budget_requests.project_name     IS '案件名稱；RPA
 COMMENT ON COLUMN budget.budget_requests.week             IS 'ISO 週次 (1–53)，INSERT 時由應用層以 datetime.isocalendar() 帶入';
 COMMENT ON COLUMN budget.budget_requests.category         IS '預算類別（自由文字，例：研發費用 / 資訊系統）';
 COMMENT ON COLUMN budget.budget_requests.sub_category     IS '判定子類別（自由文字，例：軟體授權）';
+COMMENT ON COLUMN budget.budget_requests.expert_name      IS '負責專家姓名（自由文字，由 RPA 進件帶入或人工填寫）';
 COMMENT ON COLUMN budget.budget_requests.owner            IS '預算負責人姓名（自由文字，非 FK）';
 COMMENT ON COLUMN budget.budget_requests.amount           IS '預算金額（新台幣，精確到分）';
 COMMENT ON COLUMN budget.budget_requests.ai_result        IS 'RPA 寫入的 JSONB：{"AI處置結果":"通過","保留案件的信心分數":85}';
