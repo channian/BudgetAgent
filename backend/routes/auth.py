@@ -1,6 +1,6 @@
 from functools import wraps
 from flask import Blueprint, request, jsonify, session
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash
 from db import cursor as db_cursor, row_to_dict
 
 auth_bp = Blueprint("auth", __name__)
@@ -73,29 +73,3 @@ def me():
         return jsonify(error="未登入"), 401
     return jsonify(user=_safe(user))
 
-
-# ── Password management (admin only) ─────────────────────────────────
-@auth_bp.put("/users/<int:user_id>/password")
-@require_auth
-def set_password(user_id):
-    """Admin sets or resets a user's password. Accepts any characters: *, &, @, etc."""
-    caller = current_user()
-    if caller.get("role") != "admin":
-        return jsonify(error="僅系統管理員可設定密碼"), 403
-
-    data     = request.json or {}
-    new_pass = data.get("password", "")
-    if not new_pass:
-        return jsonify(error="密碼不得為空"), 400
-
-    hashed = generate_password_hash(new_pass)
-    try:
-        with db_cursor(commit=True) as cur:
-            cur.execute(
-                "UPDATE budget.users SET password = %s WHERE id = %s",
-                (hashed, user_id),
-            )
-    except Exception as e:
-        return jsonify(error=str(e)), 500
-
-    return jsonify(ok=True)

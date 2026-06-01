@@ -183,6 +183,17 @@ async function apiFetchUsers() {
   const d = await apiFetch("/api/users");
   return d.users || [];
 }
+async function apiCreateUser(form) {
+  const d = await apiFetch("/api/users", { method: "POST", body: JSON.stringify(form) });
+  return d;
+}
+async function apiUpdateUser(id, form) {
+  const d = await apiFetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(form) });
+  return d.user;
+}
+async function apiResetPassword(id, password) {
+  await apiFetch(`/api/users/${id}/password`, { method: "PUT", body: JSON.stringify({ password }) });
+}
 
 // ── Export / Import ───────────────────────────────────────────────────
 // Triggers a browser file download for the given scope + format (csv|xlsx)
@@ -241,6 +252,9 @@ window.API = {
   resubmit:            apiResubmitBudget,
   fetchTimeline:       apiFetchTimeline,
   fetchUsers:          apiFetchUsers,
+  createUser:          apiCreateUser,
+  updateUser:          apiUpdateUser,
+  resetPassword:       apiResetPassword,
   exportBudgets:       apiExportBudgets,
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,

@@ -123,137 +123,211 @@ function AssignmentPage() {
   );
 }
 
+const ROLE_LABELS = { admin: "系統管理員", expert: "專家複審", viewer: "檢視者" };
+const ROLE_COLORS = { admin: "var(--bad)", expert: "var(--accent)", viewer: "var(--text-muted)" };
+
+const EMPTY_FORM = { name: "", ad_account: "", department: "", email: "", role: "viewer", password: "" };
+
 function PermissionsPage() {
-  const [tab, setTab] = React.useState("roles");
-  const users = [
-    { name: "廖建勳", id: "liao.jianxun", role: "expert", dept: "資訊處", last: "今日 09:42", active: true },
-    { name: "陳建宏", id: "chen.jianhong", role: "owner", dept: "研發處", last: "今日 08:15", active: true },
-    { name: "林淑芬", id: "lin.shufen", role: "owner", dept: "行銷部", last: "昨日 17:32", active: true },
-    { name: "黃志明", id: "huang.zhiming", role: "expert", dept: "資訊處", last: "今日 10:01", active: true },
-    { name: "張雅婷", id: "zhang.yating", role: "admin", dept: "人資部", last: "今日 09:58", active: true },
-    { name: "王俊傑", id: "wang.junjie", role: "owner", dept: "營運處", last: "5 日前", active: false },
-    { name: "李怡君", id: "li.yijun", role: "viewer", dept: "稽核室", last: "今日 09:11", active: true },
-  ];
+  const [users,   setUsers]   = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err,     setErr]     = React.useState("");
+
+  // Modal state: null = closed, "new" = create, user-object = edit
+  const [modal,   setModal]   = React.useState(null);
+  const [form,    setForm]    = React.useState(EMPTY_FORM);
+  const [saving,  setSaving]  = React.useState(false);
+  const [saveErr, setSaveErr] = React.useState("");
+
+  // Password reset sub-form
+  const [pwdUserId, setPwdUserId] = React.useState(null);
+  const [newPwd,    setNewPwd]    = React.useState("");
+  const [pwdMsg,    setPwdMsg]    = React.useState("");
+
+  const load = () => {
+    setLoading(true);
+    API.fetchUsers()
+      .then(rows => { setUsers(rows); setErr(""); })
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
+  };
+  React.useEffect(load, []);
+
+  const openNew  = () => { setForm(EMPTY_FORM); setSaveErr(""); setModal("new"); };
+  const openEdit = (u) => { setForm({ name: u.name, ad_account: u.ad_account, department: u.department || "", email: u.email || "", role: u.role, password: "" }); setSaveErr(""); setModal(u); };
+  const closeModal = () => { setModal(null); setSaveErr(""); };
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.name.trim() || !form.ad_account.trim()) { setSaveErr("姓名與 AD 帳號為必填"); return; }
+    setSaving(true); setSaveErr("");
+    try {
+      if (modal === "new") {
+        await API.createUser(form);
+      } else {
+        await API.updateUser(modal.id, { name: form.name, department: form.department, email: form.email, role: form.role });
+        if (form.password) await API.resetPassword(modal.id, form.password);
+      }
+      closeModal();
+      load();
+    } catch (e) {
+      setSaveErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetPwd = async (userId) => {
+    if (!newPwd.trim()) { setPwdMsg("請輸入密碼"); return; }
+    try {
+      await API.resetPassword(userId, newPwd);
+      setNewPwd(""); setPwdUserId(null); setPwdMsg("✅ 密碼已更新");
+      setTimeout(() => setPwdMsg(""), 3000);
+    } catch (e) {
+      setPwdMsg("❌ " + e.message);
+    }
+  };
+
   return (
     <>
       <div className="page-head">
         <div>
           <h2>權限管理中心</h2>
-          <div className="lede">角色、人員及功能權限矩陣</div>
+          <div className="lede">管理使用者帳號與角色權限</div>
         </div>
         <div className="actions">
-          <button className="btn"><Icon.Download/>匯出權限報表</button>
-          <button className="btn accent"><Icon.Plus/>新增使用者</button>
+          <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
+          <button className="btn accent" onClick={openNew}><Icon.Plus/>新增使用者</button>
         </div>
       </div>
 
-      <div className="flex-row" style={{ gap: 0, borderBottom: "1px solid var(--border)", marginBottom: 4 }}>
-        {[
-          { id: "roles", label: "角色定義" },
-          { id: "users", label: "使用者列表" },
-          { id: "audit", label: "存取稽核" },
-        ].map((t) => (
-          <button
-            key={t.id}
-            className="btn ghost"
-            style={{
-              borderRadius: 0,
-              borderBottom: tab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
-              color: tab === t.id ? "var(--text)" : "var(--text-muted)",
-              fontWeight: tab === t.id ? 500 : 400,
-            }}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
+      {pwdMsg && <div style={{ padding: "8px 0", color: "var(--ok)", fontSize: 13 }}>{pwdMsg}</div>}
 
-      {tab === "roles" && (
-        <div className="agent-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-          {MOCK.ROLES.map((r) => (
-            <div key={r.id} className="agent-card">
-              <div className="head">
-                <div className="av" style={{ background: "var(--surface-2)", color: "var(--text-muted)" }}>{r.id.slice(0, 2).toUpperCase()}</div>
-                <div className="meta">
-                  <h4>{r.name}</h4>
-                  <div className="ver">{r.id} · {r.count} 名使用者</div>
-                </div>
+      {/* ── User table ── */}
+      <div className="card">
+        <div className="card-body tight">
+          <div className="user-row head">
+            <div>姓名</div>
+            <div>AD 帳號</div>
+            <div>角色</div>
+            <div>部門</div>
+            <div style={{ textAlign: "right" }}>操作</div>
+          </div>
+          {loading && <div style={{ padding: 20, color: "var(--text-muted)", textAlign: "center" }}>載入中…</div>}
+          {!loading && users.length === 0 && <div style={{ padding: 20, color: "var(--text-muted)", textAlign: "center" }}>尚無使用者</div>}
+          {users.map(u => (
+            <div className="user-row" key={u.id}>
+              <div className="nm">
+                <div className="av">{(u.name || "?")[0]}</div>
+                <div>{u.name}</div>
               </div>
-              <div className="desc">{r.desc}</div>
-              <div className="stats">
-                {["建立預算單", "AI 初審", "專家複審", "系統設定"].map((p, i) => {
-                  const active = (i === 0 && r.id !== "viewer") ||
-                                 (i === 1 && (r.id === "admin" || r.id === "expert")) ||
-                                 (i === 2 && (r.id === "admin" || r.id === "expert")) ||
-                                 (i === 3 && r.id === "admin");
-                  return (
-                    <span key={p} style={{ color: active ? "var(--ok)" : "var(--text-subtle)", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: 50, background: active ? "var(--ok)" : "var(--border)" }}/>
-                      {p}
-                    </span>
-                  );
-                })}
+              <div className="mono" style={{ fontSize: 12 }}>{u.ad_account}</div>
+              <div>
+                <span className="tag-sm" style={{ color: ROLE_COLORS[u.role] }}>
+                  {ROLE_LABELS[u.role] || u.role}
+                </span>
+              </div>
+              <div style={{ color: "var(--text-muted)", fontSize: 13 }}>{u.department || "—"}</div>
+              <div style={{ textAlign: "right", display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                {pwdUserId === u.id ? (
+                  <>
+                    <input
+                      type="password"
+                      value={newPwd}
+                      onChange={e => setNewPwd(e.target.value)}
+                      placeholder="新密碼"
+                      style={{ width: 120, fontSize: 12, padding: "3px 7px", border: "1px solid var(--border)", borderRadius: 4 }}
+                    />
+                    <button className="btn sm" onClick={() => resetPwd(u.id)}>確認</button>
+                    <button className="btn sm ghost" onClick={() => { setPwdUserId(null); setNewPwd(""); }}>取消</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btn sm ghost" onClick={() => { setPwdUserId(u.id); setNewPwd(""); }}>重設密碼</button>
+                    <button className="btn sm" onClick={() => openEdit(u)}>編輯</button>
+                  </>
+                )}
               </div>
             </div>
           ))}
         </div>
-      )}
+      </div>
 
-      {tab === "users" && (
-        <div className="card">
-          <div className="card-body tight">
-            <div className="user-row head">
-              <div>姓名</div>
-              <div>角色</div>
-              <div>部門</div>
-              <div>最後登入</div>
-              <div style={{ textAlign: "right" }}>狀態</div>
+      {/* ── Role reference ── */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head"><h3>角色權限對照 <span className="tag">REFERENCE</span></h3></div>
+        <div className="card-body tight">
+          {MOCK.ROLES.map(r => (
+            <div key={r.id} className="user-row" style={{ gridTemplateColumns: "120px 1fr" }}>
+              <div><span className="tag-sm" style={{ color: ROLE_COLORS[r.id] }}>{r.name}</span></div>
+              <div style={{ color: "var(--text-muted)", fontSize: 13 }}>{r.desc}</div>
             </div>
-            {users.map((u) => (
-              <div className="user-row" key={u.id}>
-                <div className="nm">
-                  <div className="av">{u.name[0]}</div>
-                  <div>{u.name}<small>{u.id}</small></div>
-                </div>
-                <div>
-                  <span className="tag-sm">{MOCK.ROLES.find((r) => r.id === u.role)?.name}</span>
-                </div>
-                <div style={{ color: "var(--text-muted)" }}>{u.dept}</div>
-                <div className="mono" style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{u.last}</div>
-                <div style={{ textAlign: "right" }}>
-                  <span className={`badge ${u.active ? "ok" : "muted"}`}>
-                    <span className="b-dot"/>{u.active ? "啟用" : "停用"}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
-      )}
+      </div>
 
-      {tab === "audit" && (
-        <div className="card">
-          <div className="card-head"><h3>存取紀錄 <span className="tag">LAST 50</span></h3></div>
-          <div className="card-body tight">
-            {[
-              { who: "廖建勳", act: "簽核核可", obj: "BG-2026-W21-0008", t: "今日 09:42:11" },
-              { who: "陳建宏", act: "建立預算單", obj: "BG-2026-W21-0015", t: "今日 09:33:02" },
-              { who: "張雅婷", act: "編輯權限", obj: "ROLE:expert", t: "今日 08:58:44" },
-              { who: "AI Agent (BSV)", act: "AI 初審", obj: "BG-2026-W21-0014", t: "今日 08:52:01" },
-              { who: "黃志明", act: "退回案件", obj: "BG-2026-W20-0033", t: "昨日 17:48:21" },
-              { who: "林淑芬", act: "登入系統", obj: "AD/lin.shufen", t: "昨日 17:32:09" },
-            ].map((row, i) => (
-              <div key={i} className="user-row" style={{ gridTemplateColumns: "180px 140px 1fr 160px" }}>
-                <div className="nm">
-                  <div className="av">{row.who[0]}</div>
-                  <div>{row.who}<small>USER</small></div>
+      {/* ── Modal ── */}
+      {modal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 200, display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && closeModal()}>
+          <div className="card" style={{ width: 440, maxWidth: "92vw", padding: 0 }}>
+            <div className="card-head" style={{ padding: "16px 20px" }}>
+              <h3>{modal === "new" ? "新增使用者" : `編輯：${modal.name}`}</h3>
+              <button className="btn ghost sm" onClick={closeModal}>✕</button>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+              <div className="field-row two">
+                <div className="field">
+                  <label>姓名 <span className="req">*</span></label>
+                  <input type="text" value={form.name} onChange={e => set("name", e.target.value)} placeholder="中文姓名"/>
                 </div>
-                <div><span className="tag-sm">{row.act}</span></div>
-                <div className="mono" style={{ fontSize: 11.5, color: "var(--accent-strong)" }}>{row.obj}</div>
-                <div className="mono" style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "right" }}>{row.t}</div>
+                <div className="field">
+                  <label>部門</label>
+                  <input type="text" value={form.department} onChange={e => set("department", e.target.value)} placeholder="例：資訊處"/>
+                </div>
               </div>
-            ))}
+
+              <div className="field-row two">
+                <div className="field">
+                  <label>AD 帳號 <span className="req">*</span></label>
+                  <input type="text" value={form.ad_account} onChange={e => set("ad_account", e.target.value)}
+                    placeholder="例：john.doe" disabled={modal !== "new"}
+                    style={{ opacity: modal !== "new" ? 0.5 : 1 }}/>
+                </div>
+                <div className="field">
+                  <label>Email</label>
+                  <input type="text" value={form.email} onChange={e => set("email", e.target.value)} placeholder="選填"/>
+                </div>
+              </div>
+
+              <div className="field-row two">
+                <div className="field">
+                  <label>角色 <span className="req">*</span></label>
+                  <select value={form.role} onChange={e => set("role", e.target.value)}>
+                    <option value="admin">admin — 系統管理員</option>
+                    <option value="expert">expert — 專家複審</option>
+                    <option value="viewer">viewer — 檢視者</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>{modal === "new" ? "初始密碼" : "重設密碼（選填）"}</label>
+                  <input type="password" value={form.password} onChange={e => set("password", e.target.value)}
+                    placeholder={modal === "new" ? "留空則帳號無法登入" : "不修改請留空"}/>
+                </div>
+              </div>
+
+              {saveErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {saveErr}</div>}
+
+              <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                <button className="btn ghost" onClick={closeModal}>取消</button>
+                <button className="btn primary" onClick={save} disabled={saving}>
+                  {saving ? "儲存中…" : modal === "new" ? "建立" : "儲存"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
