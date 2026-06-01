@@ -18,8 +18,9 @@ const DEFAULT_COLS = [
 const PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"];
 const COMPLETED_STATUSES = ["CLOSED", "REJECTED"];
 
-function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh }) {
+function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUser }) {
   const isPending = scope === "pending";
+  const isViewer  = (currentUser?.role || "viewer") === "viewer";
   // API already scopes the data; client-side filter is a safety net
   const filtered = budgets.filter((b) =>
     isPending ? PENDING_STATUSES.includes(b.status)
@@ -170,7 +171,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh }) {
             style={{ display: "none" }}
             onChange={doImport}
           />
-          {isPending && (
+          {isPending && !isViewer && (
             <button className="btn accent" onClick={onNew}>
               <Icon.Plus/>建立預算單
             </button>

@@ -219,10 +219,9 @@ const AGENTS = [
 ];
 
 const ROLES = [
-  { id: "admin", name: "系統管理員", desc: "完整權限，含使用者與權限設定", count: 2 },
-  { id: "expert", name: "專家複審", desc: "可審核 AI 派發案件、調整審核處置", count: 8 },
-  { id: "owner", name: "預算負責人", desc: "可建立預算單、查看自身相關案件", count: 24 },
-  { id: "viewer", name: "檢視者", desc: "唯讀，僅可瀏覽已核可案件", count: 6 },
+  { id: "admin",  name: "系統管理員", desc: "完整權限，含派發中心與權限管理", count: 2 },
+  { id: "expert", name: "專家複審",   desc: "可審核 AI 派發案件、填寫專家複審欄位", count: 8 },
+  { id: "viewer", name: "檢視者",     desc: "唯讀，可瀏覽待簽核、已簽核完成、AI Agent 圖書館", count: 6 },
 ];
 
 window.MOCK = {

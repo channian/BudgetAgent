@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS budget.users (
     ad_account  VARCHAR(100) NOT NULL UNIQUE,
     password    VARCHAR(255) NOT NULL DEFAULT '',        -- werkzeug pbkdf2 雜湊；銜接 AD 後可留空
     role        VARCHAR(20)  NOT NULL DEFAULT 'viewer'
-                    CHECK (role IN ('admin', 'expert', 'owner', 'viewer')),
+                    CHECK (role IN ('admin', 'expert', 'viewer')),
     email       VARCHAR(200),
     created_at  TIMESTAMP    NOT NULL DEFAULT NOW()
 );
@@ -39,7 +39,7 @@ COMMENT ON COLUMN budget.users.name       IS '顯示名稱（中文姓名）';
 COMMENT ON COLUMN budget.users.department IS '所屬部門';
 COMMENT ON COLUMN budget.users.ad_account IS '登入帳號（Windows AD 帳號，唯一）；支援中英文、數字及特殊符號（@、*、& 等）';
 COMMENT ON COLUMN budget.users.password   IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
-COMMENT ON COLUMN budget.users.role       IS 'admin=系統管理員 | expert=專家複審 | owner=預算負責人 | viewer=唯讀';
+COMMENT ON COLUMN budget.users.role       IS 'admin=系統管理員 | expert=專家複審 | viewer=唯讀';
 COMMENT ON COLUMN budget.users.email      IS '電子郵件（選填）';
 
 
@@ -181,6 +181,11 @@ CREATE INDEX IF NOT EXISTS idx_notif_user_unread
 -- ══════════════════════════════════════════════════════════════════════════
 ALTER TABLE budget.users
     ADD COLUMN IF NOT EXISTS password VARCHAR(255) NOT NULL DEFAULT '';
+
+-- 移除 owner 角色（如果舊的 CHECK constraint 仍存在）
+ALTER TABLE budget.users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE budget.users ADD CONSTRAINT users_role_check
+    CHECK (role IN ('admin', 'expert', 'viewer'));
 
 COMMENT ON COLUMN budget.users.password IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
 

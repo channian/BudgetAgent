@@ -10,14 +10,16 @@ const ACTION_LABELS = {
   SLA_REMINDER:          "SLA 催辦",
 };
 
-function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit }) {
+function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, currentUser }) {
   const [comment,  setComment]  = React.useState(budget.expertComment || "");
   const [decision, setDecision] = React.useState(budget.expertResult);
   const [timeline, setTimeline] = React.useState([]);
   const [tlLoading, setTlLoading] = React.useState(true);
 
-  const isFinal = budget.status === "CLOSED" || budget.status === "REJECTED";
-  const canAct  = budget.status === "EXPERT_REVIEW";
+  const role     = currentUser?.role || "viewer";
+  const isViewer = role === "viewer";
+  const isFinal  = budget.status === "CLOSED" || budget.status === "REJECTED";
+  const canAct   = budget.status === "EXPERT_REVIEW" && !isViewer;
 
   const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
 
@@ -57,7 +59,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit }) {
           </div>
         </div>
         <div className="actions">
-          {!isFinal && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
+          {!isFinal && !isViewer && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
           <button className="btn">列印審核單</button>
           <button className="btn ghost"><Icon.More /></button>
         </div>

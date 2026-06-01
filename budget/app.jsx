@@ -149,10 +149,10 @@ function App() {
   let body   = null;
 
   if (route === "pending") {
-    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} />;
+    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} />;
     crumbs = ["待簽核"];
   } else if (route === "approved") {
-    body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} />;
+    body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} currentUser={user} />;
     crumbs = ["已簽核完成"];
   } else if (route === "library") {
     body   = <LibraryPage />;
@@ -164,7 +164,7 @@ function App() {
     body   = <PermissionsPage />;
     crumbs = ["權限管理中心"];
   } else if (route === "detail" && currentBudget) {
-    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onEdit={goEdit} />;
+    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onEdit={goEdit} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
     body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} currentUser={user} />;

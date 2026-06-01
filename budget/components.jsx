@@ -156,13 +156,18 @@ function fmtAmount(n) {
   return new Intl.NumberFormat("zh-TW").format(n);
 }
 
-function Sidebar({ route, setRoute, pendingCount, width, onResize }) {
-  const items = [
-  { id: "pending", label: "待簽核", icon: <Icon.Inbox />, count: pendingCount, dot: true },
-  { id: "approved", label: "已簽核完成", icon: <Icon.Check /> },
-  { id: "library", label: "AI Agent 圖書館", icon: <Icon.Book /> },
-  { id: "assignment", label: "派發中心人員設定", icon: <Icon.Users /> },
-  { id: "permissions", label: "權限管理中心", icon: <Icon.Shield /> }];
+function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
+  const role = user?.role || "viewer";
+
+  const allItems = [
+    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,  count: pendingCount, dot: true,  roles: ["admin","expert","viewer"] },
+    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                        roles: ["admin","expert","viewer"] },
+    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                         roles: ["admin","expert","viewer"] },
+    { id: "assignment",  label: "派發中心人員設定",  icon: <Icon.Users />,                        roles: ["admin"] },
+    { id: "permissions", label: "權限管理中心",      icon: <Icon.Shield />,                       roles: ["admin"] },
+  ];
+
+  const items = allItems.filter(it => it.roles.includes(role));
 
 
   const handleRef = React.useRef(null);
@@ -216,12 +221,12 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize }) {
         })}
       </nav>
       <div className="sidebar-foot">
-        <div className="avatar">JL</div>
+        <div className="avatar">{user?.name?.charAt(0) || "?"}</div>
         {!narrow &&
         <>
             <div className="who">
-              <div className="n">廖建勳</div>
-              <div className="r">expert · IT-001</div>
+              <div className="n">{user?.name || "—"}</div>
+              <div className="r">{role} · {user?.department || ""}</div>
             </div>
             <button className="logout" title="登出" onClick={() => window.dispatchEvent(new CustomEvent("app:logout"))}>
               <Icon.Logout />
