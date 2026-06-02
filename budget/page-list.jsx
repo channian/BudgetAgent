@@ -28,7 +28,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   );
 
   const [q, setQ] = React.useState("");
-  const [catFilter, setCatFilter] = React.useState("all");
   const [aiFilter, setAiFilter] = React.useState("all");
   const [sort, setSort] = React.useState({ k: "dispatchDate", dir: "desc" });
   const [cols, setCols] = React.useState(DEFAULT_COLS);
@@ -117,7 +116,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         b.category.includes(q)
       );
     }
-    if (catFilter !== "all") r = r.filter((b) => b.categoryId === catFilter);
     if (aiFilter !== "all") r = r.filter((b) => b.aiResult === aiFilter);
     r = [...r].sort((a, b) => {
       const av = a[sort.k], bv = b[sort.k];
@@ -127,7 +125,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       return sort.dir === "asc" ? cmp : -cmp;
     });
     return r;
-  }, [filtered, q, catFilter, aiFilter, sort]);
+  }, [filtered, q, aiFilter, sort]);
 
   const toggleSort = (k) => {
     setSort((s) => s.k === k ? { k, dir: s.dir === "asc" ? "desc" : "asc" } : { k, dir: "desc" });
@@ -217,10 +215,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <kbd>⌘K</kbd>
         </div>
         <div className="divider"/>
-        <select className="field-sel" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
-          <option value="all">全部類別</option>
-          {MOCK.CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
         <select className="field-sel" value={aiFilter} onChange={(e) => setAiFilter(e.target.value)}>
           <option value="all">全部 AI 結果</option>
           <option value="approve">AI 建議核可</option>
@@ -228,7 +222,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <option value="hold">AI 無法判定</option>
         </select>
         <div className="spacer-x"/>
-        <button className="btn sm ghost" onClick={resetCols} title="還原欄寬">↺ 還原欄寬</button>
         <span className="hint">{rows.length} / {filtered.length} 筆</span>
       </div>
 

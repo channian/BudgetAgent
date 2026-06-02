@@ -319,7 +319,6 @@ function _fmtRelTime(ts) {
 }
 
 function Topbar({ crumbs, notifs = [], onMarkRead, onMarkAllRead }) {
-  const now    = MOCK.fmtDate(new Date());
   const unread = notifs.filter(n => !n.read_at).length;
   const [open, setOpen] = React.useState(false);
 
@@ -347,7 +346,6 @@ function Topbar({ crumbs, notifs = [], onMarkRead, onMarkAllRead }) {
       <div className="spacer" />
       <div className="meta">
         <span><span className="dot" />系統運作正常</span>
-        <span className="mono">{now}</span>
       </div>
       <div className="notif-wrap" ref={wrapRef}>
         <button className="icon-btn" title="通知" onClick={() => setOpen(o => !o)}>

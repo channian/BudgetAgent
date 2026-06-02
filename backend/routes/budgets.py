@@ -110,6 +110,8 @@ def create_budget():
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "CREATE", user.get("name", "system"), None, data)
+    _notify_roles(["admin"],
+        f"📝 {user.get('name','系統')} 建立了新案件「{data.get('project_name','')}」(#{budget_id})。")
     return jsonify(id=budget_id, status=status), 201
 
 
@@ -163,6 +165,9 @@ def update_budget(budget_id):
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "UPDATE", user.get("name", "system"), before, after)
+    _notify_roles(["admin"],
+        f"✏️ {user.get('name','系統')} 更新了案件「{before.get('project_name','')}」(#{budget_id})，"
+        f"修改欄位：{', '.join(updates.keys())}。")
     return jsonify(budget=after)
 
 
@@ -480,6 +485,8 @@ def import_budgets():
     except Exception:
         pass
 
+    _notify_roles(["admin"],
+        f"📥 {user.get('name','系統')} 匯入了 {inserted} 筆案件（略過 {skipped} 筆）。")
     return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
 
 
