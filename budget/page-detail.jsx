@@ -51,10 +51,16 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
   const handleDelete = async () => {
     setMenuOpen(false);
     if (busy) return;
-    if (!window.confirm(`確定要刪除案件「${budget.project}」(#${budget.id})？\n此操作無法復原，案件及其稽核紀錄將一併移除。`)) return;
+    const reason = window.prompt(
+      `確定要刪除案件「${budget.project}」(#${budget.id})？\n` +
+      `此操作無法復原，案件及其稽核紀錄將一併移除。\n\n` +
+      `請輸入刪除原因（必填，將記錄於通知）：`
+    );
+    if (reason === null) return;                 // cancelled
+    if (!reason.trim()) { alert("請輸入刪除原因。"); return; }
     setBusy(true);
     try {
-      await onDelete(budget);
+      await onDelete(budget, reason.trim());
     } finally {
       setBusy(false);
     }

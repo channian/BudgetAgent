@@ -241,6 +241,10 @@ def delete_budget(budget_id):
     if user.get("role") != "admin":
         return jsonify(error="僅系統管理員可刪除案件"), 403
 
+    reason = ((request.json or {}).get("reason") or "").strip()
+    if not reason:
+        return jsonify(error="請提供刪除原因"), 400
+
     try:
         with db_cursor() as cur:
             cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
@@ -257,7 +261,8 @@ def delete_budget(budget_id):
         return jsonify(error=str(e)), 500
 
     _notify_roles(["admin"],
-        f"🗑 {user.get('name','系統')} 刪除案件「{before['project_name']}」(#{budget_id})。")
+        f"🗑 {user.get('name','系統')} 刪除案件「{before['project_name']}」(#{budget_id})，"
+        f"原因：{reason}")
     return jsonify(ok=True, deleted=budget_id)
 
 

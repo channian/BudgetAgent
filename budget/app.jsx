@@ -157,9 +157,9 @@ function App() {
     } catch (e) { setApiError(e.message); }
   };
 
-  const deleteBudget = async (b) => {
+  const deleteBudget = async (b, reason) => {
     try {
-      await API.deleteBudget(b.dbId);
+      await API.deleteBudget(b.dbId, reason);
       await loadBudgets();
       setRoute("pending");
     } catch (e) { setApiError(e.message); }

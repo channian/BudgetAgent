@@ -180,8 +180,8 @@ async function apiRejectBudget(dbId, comment, final = false) {
   const d = await apiFetch(`/api/budgets/${dbId}/reject`, { method: "POST", body: JSON.stringify({ comment, final }) });
   return dbToFrontend(d.budget);
 }
-async function apiDeleteBudget(dbId) {
-  await apiFetch(`/api/budgets/${dbId}`, { method: "DELETE" });
+async function apiDeleteBudget(dbId, reason) {
+  await apiFetch(`/api/budgets/${dbId}`, { method: "DELETE", body: JSON.stringify({ reason }) });
 }
 async function apiResubmitBudget(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/resubmit`, { method: "POST" });
