@@ -439,10 +439,11 @@ def export_budgets():
 
 # ── Import (CSV / XLSX) ───────────────────────────────────────────────
 IMPORT_ALIASES = {
-    "project_name": ["項目名稱", "project_name", "project", "案件名稱"],
+    "project_name": ["項目名稱", "Project Name", "project_name", "project", "案件名稱"],
     "category":     ["類別", "category", "判定類別"],
     "owner":        ["預算負責人", "owner", "負責人"],
     "amount":       ["金額", "amount", "金額 (NT$)"],
+    "budget_no":    ["預算單號", "BudgetNo.", "BudgetNo", "Budget No.", "Budget No", "budget_no"],
 }
 
 
@@ -519,12 +520,13 @@ def import_budgets():
                 try:
                     cur.execute(
                         """INSERT INTO budget.budget_requests
-                               (project_name, week, category, owner, amount, status)
-                           VALUES (%s, %s, %s, %s, %s, 'AI_REVIEW')
+                               (project_name, week, category, owner, amount, budget_no, status)
+                           VALUES (%s, %s, %s, %s, %s, %s, 'AI_REVIEW')
                            ON CONFLICT (project_name) DO UPDATE SET
-                               category = EXCLUDED.category,
-                               owner    = EXCLUDED.owner,
-                               amount   = EXCLUDED.amount
+                               category  = EXCLUDED.category,
+                               owner     = EXCLUDED.owner,
+                               amount    = EXCLUDED.amount,
+                               budget_no = COALESCE(EXCLUDED.budget_no, budget_requests.budget_no)
                            RETURNING id""",
                         (
                             project,
@@ -532,6 +534,7 @@ def import_budgets():
                             cell(row, "category"),
                             cell(row, "owner"),
                             _parse_amount(cell(row, "amount")),
+                            cell(row, "budget_no"),
                         ),
                     )
                     inserted += 1

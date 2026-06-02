@@ -8,8 +8,9 @@ const DEFAULT_COLS = [
   { k: "project",     label: "項目名稱",     w: 280, min: 160 },
   { k: "owner",       label: "預算負責人",   w: 170, min: 140 },
   { k: "amount",      label: "金額 (NT$)",   w: 130, sortable: true, min: 110, align: "right" },
-  { k: "aiResult",    label: "AI 審核處置",  w: 230, min: 180 },
-  { k: "expertResult",label: "專家審核處置", w: 130, min: 110 },
+  { k: "aiResult",      label: "AI 審核處置", w: 240, min: 180 },
+  { k: "expertResult",  label: "審核處置",   w: 120, min: 100 },
+  { k: "expertComment", label: "專家評論",   w: 200, min: 140 },
   { k: "status",      label: "狀態",         w: 110, min: 90 },
   { k: "dispatchDate",label: "派送日期",     w: 130, sortable: true, min: 110 },
   { k: "signDate",    label: "簽核日期",     w: 130, min: 110 },
@@ -294,12 +295,24 @@ function renderCell(b, k) {
     case "owner":        return <OwnerCell owner={b.owner}/>;
     case "amount":       return fmtAmount(b.amount);
     case "aiResult":     return (
-      <span className="flex-row" style={{ gap: 6 }}>
-        <ResultBadge result={b.aiResult} kind="ai"/>
-        <Conf value={b.aiConfidence}/>
-      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <span className="flex-row" style={{ gap: 6 }}>
+          <ResultBadge result={b.aiResult} kind="ai"/>
+          <Conf value={b.aiConfidence}/>
+        </span>
+        {b.aiReason && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }} title={b.aiReason}>
+            {b.aiReason}
+          </span>
+        )}
+      </div>
     );
-    case "expertResult": return <ResultBadge result={b.expertResult}/>;
+    case "expertResult":  return <ResultBadge result={b.expertResult}/>;
+    case "expertComment": return b.expertComment
+      ? <span style={{ fontSize: 12, color: "var(--text-muted)" }} title={b.expertComment}>
+          {b.expertComment.length > 28 ? b.expertComment.slice(0, 28) + "…" : b.expertComment}
+        </span>
+      : <span style={{ color: "var(--text-muted)" }}>—</span>;
     case "status":       return <StatusBadge status={b.status}/>;
     case "dispatchDate": return MOCK.fmtDateShort(b.dispatchDate);
     case "signDate":     return b.signDate ? MOCK.fmtDateShort(b.signDate) : "—";
