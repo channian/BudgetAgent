@@ -5,6 +5,52 @@
 // 空字串 = 與前端同源（Flask 直接 serve），可用 window.API_BASE 覆寫
 const API_BASE = window.API_BASE !== undefined ? window.API_BASE : "";
 
+// ── Clipboard helper ──────────────────────────────────────────────────
+// navigator.clipboard 只在 HTTPS / localhost（secure context）可用；
+// 內網以 http://10.x 連線時會是 undefined，需退回 execCommand。
+// 回傳 Promise，方便呼叫端 .then()/.catch()。
+function copyToClipboard(text) {
+  const value = text == null ? "" : String(text);
+
+  // 1) 優先使用現代 API（secure context）
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(value);
+  }
+
+  // 2) 退回 execCommand：建立隱藏 textarea、選取、複製
+  return new Promise((resolve, reject) => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      // 避免捲動跳動、避免被當成表單元素送出
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.left = "0";
+      ta.style.width = "1px";
+      ta.style.height = "1px";
+      ta.style.padding = "0";
+      ta.style.border = "none";
+      ta.style.outline = "none";
+      ta.style.boxShadow = "none";
+      ta.style.background = "transparent";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, value.length);
+
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error("execCommand copy failed"));
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+window.copyToClipboard = copyToClipboard;
+
 // ── Category name ↔ frontend colour ID ───────────────────────────────
 const CAT_NAME_TO_ID = {
   "研發費用": "RD",

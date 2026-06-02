@@ -24,7 +24,9 @@ const COMPLETED_STATUSES = ["CLOSED", "REJECTED"];
 function CopyBtn({ text }) {
   const [done, setDone] = React.useState(false);
   const handleCopy = (e) => {
+    e.preventDefault();
     e.stopPropagation();
+    if (!text) return;
     copyToClipboard(text).then(() => {
       setDone(true);
       setTimeout(() => setDone(false), 1500);
@@ -33,7 +35,7 @@ function CopyBtn({ text }) {
     });
   };
   return (
-    <button className="copy-btn" title="複製" onClick={handleCopy}>
+    <button type="button" className="copy-btn" title="複製" onClick={handleCopy}>
       {done ? "✓" : <Icon.Copy s={11} />}
     </button>
   );
