@@ -233,6 +233,34 @@ def dispatch_budget(budget_id):
     return jsonify(budget=after)
 
 
+# ── Delete a case (admin only) ───────────────────────────────────────
+@budgets_bp.delete("/budgets/<int:budget_id>")
+@require_auth
+def delete_budget(budget_id):
+    user = current_user()
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可刪除案件"), 403
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
+            before_row = cur.fetchone()
+        if not before_row:
+            return jsonify(error="案件不存在"), 404
+        before = row_to_dict(before_row)
+
+        with db_cursor(commit=True) as cur:
+            # remove dependent audit logs first to satisfy FK
+            cur.execute("DELETE FROM budget.audit_logs WHERE request_id = %s", (budget_id,))
+            cur.execute("DELETE FROM budget.budget_requests WHERE id = %s", (budget_id,))
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    _notify_roles(["admin"],
+        f"🗑 {user.get('name','系統')} 刪除案件「{before['project_name']}」(#{budget_id})。")
+    return jsonify(ok=True, deleted=budget_id)
+
+
 # ── Expert review (save comment + recommendation, no finalise) ───────
 @budgets_bp.post("/budgets/<int:budget_id>/review")
 @require_auth

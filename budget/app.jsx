@@ -157,6 +157,14 @@ function App() {
     } catch (e) { setApiError(e.message); }
   };
 
+  const deleteBudget = async (b) => {
+    try {
+      await API.deleteBudget(b.dbId);
+      await loadBudgets();
+      setRoute("pending");
+    } catch (e) { setApiError(e.message); }
+  };
+
   const inlineApprove = async (b, comment = "") => {
     await API.approve(b.dbId, comment);
   };
@@ -212,7 +220,7 @@ function App() {
     body   = <PermissionsPage />;
     crumbs = ["權限管理中心"];
   } else if (route === "detail" && currentBudget) {
-    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onEdit={goEdit} currentUser={user} />;
+    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onDelete={deleteBudget} onEdit={goEdit} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
     body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} currentUser={user} />;

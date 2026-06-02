@@ -10,15 +10,17 @@ const ACTION_LABELS = {
   SLA_REMINDER:          "SLA 催辦",
 };
 
-function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onEdit, currentUser }) {
+function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onDelete, onEdit, currentUser }) {
   const [comment,  setComment]  = React.useState(budget.expertComment || "");
   const [decision, setDecision] = React.useState(budget.expertResult);
   const [timeline, setTimeline] = React.useState([]);
   const [tlLoading, setTlLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
 
   const role     = currentUser?.role || "viewer";
   const isViewer = role === "viewer";
+  const isAdmin  = role === "admin";
   const isFinal  = budget.status === "CLOSED" || budget.status === "REJECTED";
   const isOpen   = budget.status === "EXPERT_REVIEW" || budget.status === "PENDING_ACTION";
   const canReview = isOpen && !isViewer;                    // 專家可寫評論 + 建議
@@ -41,6 +43,18 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
     try {
       const dec = decision === "approve" ? "通過" : decision === "reject" ? "退件" : null;
       await onSaveReview(budget, comment, dec);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setMenuOpen(false);
+    if (busy) return;
+    if (!window.confirm(`確定要刪除案件「${budget.project}」(#${budget.id})？\n此操作無法復原，案件及其稽核紀錄將一併移除。`)) return;
+    setBusy(true);
+    try {
+      await onDelete(budget);
     } finally {
       setBusy(false);
     }
@@ -75,7 +89,26 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
         </div>
         <div className="actions">
           {!isFinal && !isViewer && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
-          <button className="btn ghost"><Icon.More /></button>
+          {isAdmin && (
+            <div className="more-wrap">
+              <button
+                className="btn ghost"
+                onClick={() => setMenuOpen(o => !o)}
+                aria-haspopup="true"
+                aria-expanded={menuOpen}
+              ><Icon.More /></button>
+              {menuOpen && (
+                <>
+                  <div className="more-backdrop" onClick={() => setMenuOpen(false)} />
+                  <div className="more-menu" role="menu">
+                    <button className="more-item danger" role="menuitem" onClick={handleDelete} disabled={busy}>
+                      🗑 刪除案件
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
