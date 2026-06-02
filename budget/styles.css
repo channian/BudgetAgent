@@ -1,4 +1,4 @@
-/* pensieve — AI Agent 預算審核平台
+/* 預算AI審核平台 — AI Agent 預算審核平台
  * Warm cream backdrop, rounded everything, designerly accents.
  */
 
@@ -213,6 +213,7 @@ html, body { height: 100%; overflow: hidden; }
   grid-template-columns: var(--sidebar-w) 1fr;
   height: 100vh;
   position: relative;
+  transition: grid-template-columns 0.2s ease;
 }
 
 .col-right {
@@ -230,9 +231,24 @@ html, body { height: 100%; overflow: hidden; }
   display: flex; flex-direction: column;
   height: 100vh;
   position: relative;
-  min-width: 64px;
+  min-width: 56px;
   overflow: hidden;
+  transition: width 0.2s ease;
 }
+
+.sidebar-collapse-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none; border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s, transform 0.2s;
+}
+.sidebar-collapse-btn:hover { background: var(--surface-hover); color: var(--text); }
+.sidebar.narrow .sidebar-collapse-btn { margin-left: 0; transform: rotate(180deg); }
 .sidebar-resize {
   position: absolute;
   top: 0; right: -3px;

@@ -74,6 +74,11 @@ const Icon = {
       <path d="m15 18-6-6 6-6" />
     </svg>,
 
+  ChevronLeft: ({ s = 14 }) =>
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m15 18-6-6 6-6" />
+    </svg>,
+
   Logout: ({ s = 14 }) =>
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -156,7 +161,7 @@ function fmtAmount(n) {
   return new Intl.NumberFormat("zh-TW").format(n);
 }
 
-function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
+function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collapsed, onToggleCollapse }) {
   const role = user?.role || "viewer";
 
   // Change-password modal
@@ -219,18 +224,21 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
     window.addEventListener("mouseup", onUp);
   };
 
-  const narrow = width < 140;
+  const narrow = collapsed || width < 140;
 
   return (
     <aside className={`sidebar ${narrow ? "narrow" : ""}`}>
       <div className="sidebar-brand">
-        <div className="mark">p</div>
+        <div className="mark">預</div>
         {!narrow &&
         <div className="title">
-            pensieve
-            <small>budget memory · 2026</small>
+            預算AI審核平台
+            <small>AI Agent 審核 · 2026</small>
           </div>
         }
+        <button className="sidebar-collapse-btn" title={narrow ? "展開側邊欄" : "收合側邊欄"} onClick={onToggleCollapse}>
+          <Icon.ChevronLeft s={14} />
+        </button>
       </div>
       {!narrow && <div className="sidebar-section">主功能</div>}
       <nav className="sidebar-nav">
@@ -327,7 +335,7 @@ function Topbar({ crumbs, notifs = [], onMarkRead, onMarkAllRead }) {
   return (
     <div className="topbar">
       <div className="crumb">
-        <span className="root">pensieve</span>
+        <span className="root">預算AI審核平台</span>
         <span className="sep">/</span>
         {crumbs.map((c, i) =>
           <React.Fragment key={i}>

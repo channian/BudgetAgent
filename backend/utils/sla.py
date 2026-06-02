@@ -26,42 +26,37 @@ def check_sla_violations():
 
 
 def _notify(row):
-    target_name = row.get("expert_name") or row.get("owner")
-    if not target_name:
-        return
-
+    msg = (
+        f"⏰ [SLA 催辦] 案件「{row['project_name']}」(#{row['id']}) "
+        f"已超過 {SLA_HOURS} 小時未更新，請盡速處理。"
+    )
     try:
         with db_cursor() as cur:
             cur.execute(
-                "SELECT id FROM budget.users WHERE name = %s",
-                (target_name,),
+                "SELECT id FROM budget.users WHERE role = ANY(%s)",
+                (["admin", "viewer"],),
             )
-            user = cur.fetchone()
-        if not user:
-            return
+            user_ids = [r["id"] for r in cur.fetchall()]
 
-        # Skip if already notified in the last 24 h for this case
-        with db_cursor() as cur:
-            cur.execute(
-                """SELECT 1 FROM budget.notifications
-                   WHERE user_id = %s
-                     AND text LIKE %s
-                     AND created_at > NOW() - INTERVAL '24 hours'""",
-                (user["id"], f"%#{row['id']}%SLA%"),
-            )
-            if cur.fetchone():
-                return
+        for uid in user_ids:
+            # Skip if already notified in the last 24 h for this case
+            with db_cursor() as cur:
+                cur.execute(
+                    """SELECT 1 FROM budget.notifications
+                       WHERE user_id = %s
+                         AND text LIKE %s
+                         AND created_at > NOW() - INTERVAL '24 hours'""",
+                    (uid, f"%#{row['id']}%SLA%"),
+                )
+                if cur.fetchone():
+                    continue
+            with db_cursor(commit=True) as cur:
+                cur.execute(
+                    "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
+                    (uid, msg),
+                )
 
-        msg = (
-            f"[SLA 催辦] 案件「{row['project_name']}」(#{row['id']}) "
-            f"已超過 {SLA_HOURS} 小時未更新，請盡速處理。"
-        )
-        with db_cursor(commit=True) as cur:
-            cur.execute(
-                "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
-                (user["id"], msg),
-            )
-
-        audit_log(row["id"], "SLA_REMINDER", "system", None, {"target": target_name})
+        audit_log(row["id"], "SLA_REMINDER", "system", None,
+                  {"status": row["status"], "notified_roles": ["admin", "viewer"]})
     except Exception:
         pass

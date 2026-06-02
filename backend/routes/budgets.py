@@ -11,6 +11,24 @@ PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"]
 COMPLETED_STATUSES = ["CLOSED", "REJECTED"]
 
 
+def _notify_roles(roles, message):
+    """Insert a notification row for every user whose role is in `roles`."""
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id FROM budget.users WHERE role = ANY(%s)", (roles,))
+            user_ids = [r["id"] for r in cur.fetchall()]
+        if not user_ids:
+            return
+        with db_cursor(commit=True) as cur:
+            for uid in user_ids:
+                cur.execute(
+                    "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
+                    (uid, message),
+                )
+    except Exception:
+        pass
+
+
 # ── List ──────────────────────────────────────────────────────────────
 @budgets_bp.get("/budgets")
 @require_auth
@@ -187,6 +205,8 @@ def approve_budget(budget_id):
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "APPROVE", user.get("name", "system"), before, after)
+    _notify_roles(["admin", "viewer"],
+        f"✅ 案件「{before['project_name']}」(#{budget_id}) 已核准通過，由 {user.get('name','系統')} 簽核。")
     return jsonify(budget=after)
 
 
@@ -225,6 +245,12 @@ def reject_budget(budget_id):
 
     action = "REJECT_FINAL" if final else "RETURN_FOR_SUPPLEMENT"
     audit_log(budget_id, action, user.get("name", "system"), before, after)
+    if final:
+        _notify_roles(["admin", "viewer"],
+            f"❌ 案件「{before['project_name']}」(#{budget_id}) 已退件，由 {user.get('name','系統')} 審核。")
+    else:
+        _notify_roles(["admin", "viewer"],
+            f"⚠ 案件「{before['project_name']}」(#{budget_id}) 退回補件，等待申請人補充資料。")
     return jsonify(budget=after)
 
 
@@ -259,6 +285,8 @@ def resubmit_budget(budget_id):
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "RESUBMIT", user.get("name", "system"), before, after)
+    _notify_roles(["admin", "viewer"],
+        f"🔄 案件「{before['project_name']}」(#{budget_id}) 已重新遞交，進入專家審核。")
     return jsonify(budget=after)
 
 

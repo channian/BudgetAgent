@@ -10,14 +10,19 @@ function App() {
   const [currentBudget, setCurrentBudget] = React.useState(null);
   const [notifs, setNotifs]               = React.useState([]);
 
-  // Sidebar width (resizable + persisted)
+  // Sidebar width (resizable + persisted) + collapse toggle
   const [sidebarW, setSidebarW] = React.useState(() => {
     try { return Number(localStorage.getItem("pensieve.sidebarW")) || 240; } catch { return 240; }
   });
+  const [collapsed, setCollapsed] = React.useState(false);
+
   React.useEffect(() => {
-    document.documentElement.style.setProperty("--sidebar-w", `${sidebarW}px`);
-    try { localStorage.setItem("pensieve.sidebarW", String(sidebarW)); } catch {}
-  }, [sidebarW]);
+    const w = collapsed ? 56 : sidebarW;
+    document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
+    if (!collapsed) {
+      try { localStorage.setItem("pensieve.sidebarW", String(sidebarW)); } catch {}
+    }
+  }, [sidebarW, collapsed]);
 
   // Tweaks
   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -203,7 +208,7 @@ function App() {
   return (
     <>
       <div className="app">
-        <Sidebar route={route} setRoute={(r) => setRoute(r)} pendingCount={pendingCount} width={sidebarW} onResize={setSidebarW} user={user} />
+        <Sidebar route={route} setRoute={(r) => setRoute(r)} pendingCount={pendingCount} width={sidebarW} onResize={setSidebarW} user={user} collapsed={collapsed} onToggleCollapse={() => setCollapsed(c => !c)} />
         <div className="col-right">
           <Topbar crumbs={crumbs} notifs={notifs} onMarkRead={markNotifRead} onMarkAllRead={markAllRead} />
           {apiError && (
