@@ -8,6 +8,7 @@ function App() {
   const [loading, setLoading]         = React.useState(false);
   const [apiError, setApiError]       = React.useState(null);
   const [currentBudget, setCurrentBudget] = React.useState(null);
+  const [notifs, setNotifs]               = React.useState([]);
 
   // Sidebar width (resizable + persisted)
   const [sidebarW, setSidebarW] = React.useState(() => {
@@ -70,6 +71,31 @@ function App() {
     window.addEventListener("app:logout", h);
     return () => window.removeEventListener("app:logout", h);
   }, []);
+
+  // Fetch notifications and poll every 60 s
+  React.useEffect(() => {
+    if (!user) return;
+    const fetchNotifs = () =>
+      API.fetchNotifications()
+         .then(data => setNotifs(data))
+         .catch(() => {});
+    fetchNotifs();
+    const tid = setInterval(fetchNotifs, 60000);
+    return () => clearInterval(tid);
+  }, [user]);
+
+  const markNotifRead = async (id) => {
+    try {
+      await API.markRead(id);
+      setNotifs(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+    } catch {}
+  };
+
+  const markAllRead = async () => {
+    const unread = notifs.filter(n => !n.read_at);
+    await Promise.all(unread.map(n => API.markRead(n.id).catch(() => {})));
+    setNotifs(prev => prev.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
+  };
 
   // Load budgets whenever user or list route changes
   const loadBudgets = React.useCallback(async (targetScope) => {
@@ -179,7 +205,7 @@ function App() {
       <div className="app">
         <Sidebar route={route} setRoute={(r) => setRoute(r)} pendingCount={pendingCount} width={sidebarW} onResize={setSidebarW} user={user} />
         <div className="col-right">
-          <Topbar crumbs={crumbs} pendingCount={pendingCount} />
+          <Topbar crumbs={crumbs} notifs={notifs} onMarkRead={markNotifRead} onMarkAllRead={markAllRead} />
           {apiError && (
             <div style={{ padding: "8px 24px", background: "var(--bad-soft)", color: "oklch(0.45 0.18 22)", fontSize: 12, borderBottom: "1px solid oklch(0.6 0.2 22 / 0.2)" }}>
               ⚠ {apiError}

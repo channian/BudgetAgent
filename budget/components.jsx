@@ -301,15 +301,36 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user }) {
 
 }
 
-function Topbar({ crumbs, pendingCount }) {
-  const now = MOCK.fmtDate(new Date());
+function _fmtRelTime(ts) {
+  if (!ts) return "";
+  const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (diff < 60)   return "剛剛";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分鐘前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前`;
+  return `${Math.floor(diff / 86400)} 天前`;
+}
+
+function Topbar({ crumbs, notifs = [], onMarkRead, onMarkAllRead }) {
+  const now    = MOCK.fmtDate(new Date());
+  const unread = notifs.filter(n => !n.read_at).length;
+  const [open, setOpen] = React.useState(false);
+
+  const wrapRef = React.useRef(null);
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   return (
     <div className="topbar">
       <div className="crumb">
         <span className="root">pensieve</span>
         <span className="sep">/</span>
         {crumbs.map((c, i) =>
-        <React.Fragment key={i}>
+          <React.Fragment key={i}>
             {i > 0 && <span className="sep">/</span>}
             <span className={i === crumbs.length - 1 ? "current" : ""}>{c}</span>
           </React.Fragment>
@@ -320,10 +341,35 @@ function Topbar({ crumbs, pendingCount }) {
         <span><span className="dot" />系統運作正常</span>
         <span className="mono">{now}</span>
       </div>
-      <button className="icon-btn" title="通知">
-        <Icon.Bell />
-        {pendingCount > 0 && <span className="red-dot" />}
-      </button>
+      <div className="notif-wrap" ref={wrapRef}>
+        <button className="icon-btn" title="通知" onClick={() => setOpen(o => !o)}>
+          <Icon.Bell />
+          {unread > 0 && <span className="notif-badge">{unread > 99 ? "99+" : unread}</span>}
+        </button>
+        {open && (
+          <div className="notif-panel">
+            <div className="notif-panel-head">
+              <span>通知{unread > 0 ? `（${unread} 未讀）` : ""}</span>
+              {unread > 0 && (
+                <button onClick={() => { onMarkAllRead && onMarkAllRead(); }}>全部標為已讀</button>
+              )}
+            </div>
+            <div className="notif-list">
+              {notifs.length === 0
+                ? <div className="notif-empty">目前沒有通知</div>
+                : notifs.map(n => (
+                    <div key={n.id}
+                         className={`notif-item ${n.read_at ? "read" : "unread"}`}
+                         onClick={() => { if (!n.read_at && onMarkRead) onMarkRead(n.id); }}>
+                      <div className="notif-item-text">{n.text}</div>
+                      <div className="notif-item-time">{_fmtRelTime(n.created_at)}</div>
+                    </div>
+                  ))
+              }
+            </div>
+          </div>
+        )}
+      </div>
     </div>);
 
 }
