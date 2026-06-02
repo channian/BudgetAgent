@@ -20,14 +20,42 @@ const DEFAULT_COLS = [
 const PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"];
 const COMPLETED_STATUSES = ["CLOSED", "REJECTED"];
 
+function copyToClipboard(text) {
+  const str = text || "";
+  // Modern API only works in secure contexts (HTTPS / localhost)
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(str);
+  }
+  // Fallback for plain-HTTP (e.g. accessed via LAN IP)
+  return new Promise((resolve, reject) => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = str;
+      ta.style.position = "fixed";
+      ta.style.top = "-9999px";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error("execCommand failed"));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 function CopyBtn({ text }) {
   const [done, setDone] = React.useState(false);
   const handleCopy = (e) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(text || "").then(() => {
+    copyToClipboard(text).then(() => {
       setDone(true);
       setTimeout(() => setDone(false), 1500);
-    }).catch(() => {});
+    }).catch(() => {
+      alert("複製失敗，請手動選取文字複製");
+    });
   };
   return (
     <button className="copy-btn" title="複製" onClick={handleCopy}>
@@ -212,9 +240,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         </div>
         <div className="actions">
           <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
-          <button className="btn" onClick={() => doExport("csv")} disabled={busy === "csv"}>
-            <Icon.Download/>{busy === "csv" ? "匯出中…" : "匯出 CSV"}
-          </button>
           <button className="btn" onClick={() => doExport("xlsx")} disabled={busy === "xlsx"}>
             <Icon.Download/>{busy === "xlsx" ? "匯出中…" : "匯出 XLSX"}
           </button>
