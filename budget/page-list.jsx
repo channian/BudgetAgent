@@ -3,6 +3,7 @@
 const DEFAULT_COLS = [
   { k: "week",        label: "週數",         w: 78,  sortable: true,  min: 60 },
   { k: "category",    label: "類別",         w: 130, min: 100 },
+  { k: "subCategory", label: "系統",         w: 130, min: 100 },
   { k: "id",          label: "預算單號",     w: 170, min: 130 },
   { k: "project",     label: "項目名稱",     w: 280, min: 160 },
   { k: "owner",       label: "預算負責人",   w: 170, min: 140 },
@@ -132,7 +133,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   };
   const arr = (k) => sort.k === k ? (sort.dir === "asc" ? "▲" : "▼") : "▾";
 
-  const totalAmt = rows.reduce((s, b) => s + b.amount, 0);
+  const totalAmt = rows.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const aiApprovedCnt = rows.filter((b) => b.aiResult === "approve").length;
   const overSLA = rows.filter((b) => {
     if (!PENDING_STATUSES.includes(b.status)) return false;
@@ -187,7 +188,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         <div className="kpi k-purple">
           <div className="glyph"><Icon.Sparkles s={18}/></div>
           <div className="lbl">合計金額</div>
-          <div className="val tnum">NT$ {fmtAmount(Math.round(totalAmt / 1000))}<small>K</small></div>
+          <div className="val tnum">NT$ {fmtAmount(Math.round(totalAmt))}</div>
           <div className="delta">本期度</div>
         </div>
         <div className="kpi k-green">
@@ -287,6 +288,7 @@ function renderCell(b, k) {
   switch (k) {
     case "week":         return <span className="week-pill">W{String(b.week).padStart(2, "0")}</span>;
     case "category":     return <CategoryChip id={b.categoryId} name={b.category}/>;
+    case "subCategory":  return b.subCategory || <span style={{color:"var(--text-muted)"}}>—</span>;
     case "id":           return <span className="id-cell">{b.id}</span>;
     case "project":      return <span title={b.project}>{b.project}</span>;
     case "owner":        return <OwnerCell owner={b.owner}/>;

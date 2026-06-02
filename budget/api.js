@@ -109,7 +109,7 @@ function frontendToDB(form) {
     sub_category: form.subCategory || null,
     expert_name:  form.expertName  || null,
     owner:        form.owner || null,        // free text
-    amount:       parseFloat(form.amount) || 0,
+    amount:       parseFloat(String(form.amount || 0).replace(/,/g, "").replace(/NT\$/g, "").trim()) || 0,
     ai_comment:   form.aiReason || null,
     ai_result_obj,
     note:         form.notes    || null,

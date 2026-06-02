@@ -344,9 +344,6 @@ function Topbar({ crumbs, notifs = [], onMarkRead, onMarkAllRead }) {
         )}
       </div>
       <div className="spacer" />
-      <div className="meta">
-        <span><span className="dot" />系統運作正常</span>
-      </div>
       <div className="notif-wrap" ref={wrapRef}>
         <button className="icon-btn" title="通知" onClick={() => setOpen(o => !o)}>
           <Icon.Bell />
