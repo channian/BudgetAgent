@@ -10,7 +10,7 @@ const ACTION_LABELS = {
   SLA_REMINDER:          "SLA 催辦",
 };
 
-function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, currentUser }) {
+function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onEdit, currentUser }) {
   const [comment,  setComment]  = React.useState(budget.expertComment || "");
   const [decision, setDecision] = React.useState(budget.expertResult);
   const [timeline, setTimeline] = React.useState([]);
@@ -20,7 +20,9 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
   const role     = currentUser?.role || "viewer";
   const isViewer = role === "viewer";
   const isFinal  = budget.status === "CLOSED" || budget.status === "REJECTED";
-  const canAct   = budget.status === "EXPERT_REVIEW" && !isViewer;
+  const isOpen   = budget.status === "EXPERT_REVIEW" || budget.status === "PENDING_ACTION";
+  const canReview = isOpen && !isViewer;                    // 專家可寫評論 + 建議
+  const canSign   = isOpen && (role === "admin" || role === "boss"); // boss/admin 可簽核
 
   const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
 
@@ -32,6 +34,17 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
       .catch(() => setTimeline([]))
       .finally(() => setTlLoading(false));
   }, [budget.dbId]);
+
+  const submitReview = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const dec = decision === "approve" ? "通過" : decision === "reject" ? "退件" : null;
+      await onSaveReview(budget, comment, dec);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submitFinal = async () => {
     if (!decision || busy) return;
@@ -116,21 +129,21 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
             </div>
             <div className="card-body">
               <div className="field" style={{ marginBottom: 14 }}>
-                <label>專家複審評論 {canAct && <span className="opt">(將寫入稽核紀錄)</span>}</label>
+                <label>專家複審評論 {canReview && <span className="opt">(將寫入稽核紀錄)</span>}</label>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  readOnly={!canAct}
+                  readOnly={!canReview}
                   placeholder="請說明審核判斷依據、補件要求或後續行動…"
                   rows={4}
                 />
-                {canAct && <div className="helper">建議引用具體政策章節或案例編號，以利後續稽核追溯</div>}
+                {canReview && <div className="helper">建議引用具體政策章節或案例編號，以利後續稽核追溯</div>}
               </div>
 
-              {canAct ? (
+              {(canReview || canSign) ? (
                 <>
                   <div className="field">
-                    <label>最終審核處置 <span className="req">*</span></label>
+                    <label>{canSign ? "最終審核處置" : "建議審核處置"} <span className="req">*</span></label>
                     <div className="seg">
                       <button
                         type="button"
@@ -144,17 +157,26 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
                         className={decision === "reject" ? "on reject" : ""}
                         onClick={() => setDecision("reject")}
                       >
-                        ✕ 退件 (最終)
+                        ✕ 退件
                       </button>
                     </div>
                   </div>
 
                   <div className="flex-row" style={{ marginTop: 18, gap: 8 }}>
-                    <button className="btn primary" disabled={!decision || busy} onClick={submitFinal}>
-                      {busy ? "送出中…" : "確認簽核"}
-                    </button>
+                    {canReview && (
+                      <button className="btn" disabled={busy} onClick={submitReview}>
+                        {busy ? "儲存中…" : "儲存評論"}
+                      </button>
+                    )}
+                    {canSign && (
+                      <button className="btn primary" disabled={!decision || busy} onClick={submitFinal}>
+                        {busy ? "送出中…" : "確認簽核"}
+                      </button>
+                    )}
                     <span className="spacer-x" />
-                    <span className="hint">簽核後不可變更，將同步至 ERP</span>
+                    <span className="hint">
+                      {canSign ? "簽核後不可變更，將同步至 ERP" : "儲存後將送交 boss / 管理員簽核"}
+                    </span>
                   </div>
                 </>
               ) : (

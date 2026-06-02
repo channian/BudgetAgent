@@ -197,9 +197,9 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
   };
 
   const allItems = [
-    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,  count: pendingCount, dot: true,  roles: ["admin","expert","viewer"] },
-    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                        roles: ["admin","expert","viewer"] },
-    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                         roles: ["admin","expert","viewer"] },
+    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,  count: pendingCount, dot: true,  roles: ["admin","boss","expert","viewer"] },
+    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                        roles: ["admin","boss","expert","viewer"] },
+    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                         roles: ["admin","boss","expert","viewer"] },
     { id: "assignment",  label: "派發中心人員設定",  icon: <Icon.Users />,                        roles: ["admin"] },
     { id: "permissions", label: "權限管理中心",      icon: <Icon.Shield />,                       roles: ["admin"] },
   ];

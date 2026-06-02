@@ -103,6 +103,9 @@ function frontendToDB(form) {
     };
   }
 
+  const expert_decision = form.expertResult === "approve" ? "通過"
+                        : form.expertResult === "reject"  ? "退件" : null;
+
   return {
     project_name: form.project,
     category:     form.category || null,     // free text
@@ -112,6 +115,8 @@ function frontendToDB(form) {
     amount:       parseFloat(String(form.amount || 0).replace(/,/g, "").replace(/NT\$/g, "").trim()) || 0,
     ai_comment:   form.aiReason || null,
     ai_result_obj,
+    expert_comment: form.expertComment || null,
+    expert_decision,
     note:         form.notes    || null,
   };
 }
@@ -177,6 +182,13 @@ async function apiRejectBudget(dbId, comment, final = false) {
 }
 async function apiResubmitBudget(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/resubmit`, { method: "POST" });
+  return dbToFrontend(d.budget);
+}
+async function apiSaveReview(dbId, { comment, decision }) {
+  const d = await apiFetch(`/api/budgets/${dbId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ comment, decision }),
+  });
   return dbToFrontend(d.budget);
 }
 async function apiDispatchBudget(dbId, form) {
@@ -302,6 +314,7 @@ window.API = {
   approve:             apiApproveBudget,
   reject:              apiRejectBudget,
   resubmit:            apiResubmitBudget,
+  saveReview:          apiSaveReview,
   dispatch:            apiDispatchBudget,
   fetchTimeline:       apiFetchTimeline,
   fetchUsers:          apiFetchUsers,

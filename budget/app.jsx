@@ -161,6 +161,19 @@ function App() {
     await API.approve(b.dbId, comment);
   };
 
+  // Boss/admin sign-off: finalise per the expert's recommendation
+  const inlineSign = async (b) => {
+    if (b.expertResult === "reject") await API.reject(b.dbId, "", true);
+    else                             await API.approve(b.dbId, "");
+  };
+
+  const saveReview = async (b, comment, decision) => {
+    try {
+      await API.saveReview(b.dbId, { comment, decision });
+      setRoute("pending");
+    } catch (e) { setApiError(e.message); }
+  };
+
   const saveNew = async (form) => {
     try {
       if (currentBudget) {
@@ -184,7 +197,7 @@ function App() {
   let body   = null;
 
   if (route === "pending") {
-    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} onApprove={inlineApprove} />;
+    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} onSign={inlineSign} />;
     crumbs = ["待簽核"];
   } else if (route === "approved") {
     body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} currentUser={user} />;
@@ -199,7 +212,7 @@ function App() {
     body   = <PermissionsPage />;
     crumbs = ["權限管理中心"];
   } else if (route === "detail" && currentBudget) {
-    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onEdit={goEdit} currentUser={user} />;
+    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onEdit={goEdit} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
     body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} currentUser={user} />;

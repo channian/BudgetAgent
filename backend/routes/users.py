@@ -5,7 +5,7 @@ from routes.auth import require_auth, current_user
 
 users_bp = Blueprint("users", __name__)
 
-ROLES = ("admin", "expert", "viewer")
+ROLES = ("admin", "boss", "expert", "viewer")
 
 
 # ── List all users ────────────────────────────────────────────────────

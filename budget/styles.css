@@ -1494,6 +1494,25 @@ table.dt tbody tr.row-selected {
   background: var(--accent-soft);
 }
 
+/* ── Pending block section headers ── */
+.block-head {
+  display: flex; align-items: center; gap: 10px;
+  margin: 4px 2px 10px;
+}
+.block-head h3 {
+  margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 8px;
+}
+.block-head .block-tag {
+  font-size: 11px; font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  letter-spacing: 0;
+}
+.block-head .hint { margin-left: auto; }
+
 /* ── Inline approve button ── */
 .btn-approve-sm {
   display: inline-flex;

@@ -141,7 +141,8 @@ def update_budget(budget_id):
     data = request.json or {}
     user = current_user()
 
-    allowed = {"expert_name", "owner", "amount", "category", "sub_category", "note", "expert_comment"}
+    allowed = {"expert_name", "owner", "amount", "category", "sub_category", "note",
+               "expert_comment", "expert_decision"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return jsonify(error="無可更新欄位"), 400
@@ -232,6 +233,47 @@ def dispatch_budget(budget_id):
     return jsonify(budget=after)
 
 
+# ── Expert review (save comment + recommendation, no finalise) ───────
+@budgets_bp.post("/budgets/<int:budget_id>/review")
+@require_auth
+def review_budget(budget_id):
+    """Expert writes their comment + recommendation. Status stays EXPERT_REVIEW;
+    the case then surfaces in the 待簽核 block for boss/admin to sign off."""
+    user = current_user()
+    if user.get("role") == "viewer":
+        return jsonify(error="檢視者無法填寫專家評論"), 403
+
+    data     = request.json or {}
+    comment  = (data.get("comment") or "").strip() or None
+    decision = data.get("decision")  # "通過" | "退件" | None
+    if decision not in ("通過", "退件", None):
+        return jsonify(error="建議處置必須是 通過/退件"), 400
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
+            before_row = cur.fetchone()
+        if not before_row:
+            return jsonify(error="案件不存在"), 404
+        before = row_to_dict(before_row)
+
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests
+                   SET expert_comment = %s, expert_decision = %s
+                   WHERE id = %s RETURNING *""",
+                (comment, decision, budget_id),
+            )
+            after = row_to_dict(cur.fetchone())
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    audit_log(budget_id, "EXPERT_COMMENT", user.get("name", "system"), before, after)
+    _notify_roles(["admin", "boss"],
+        f"📝 {user.get('name','專家')} 已完成案件「{before['project_name']}」(#{budget_id}) 的專家評論，待簽核。")
+    return jsonify(budget=after)
+
+
 # ── Approve (CLOSED) ──────────────────────────────────────────────────
 @budgets_bp.post("/budgets/<int:budget_id>/approve")
 @require_auth
@@ -239,6 +281,9 @@ def approve_budget(budget_id):
     data    = request.json or {}
     user    = current_user()
     comment = data.get("comment", "")
+
+    if user.get("role") not in ("admin", "boss"):
+        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
 
     try:
         with db_cursor() as cur:
@@ -254,7 +299,7 @@ def approve_budget(budget_id):
             cur.execute(
                 """UPDATE budget.budget_requests
                    SET expert_decision = '通過',
-                       expert_comment  = %s,
+                       expert_comment  = COALESCE(NULLIF(%s, ''), expert_comment),
                        sign_date       = NOW(),
                        cycle_time      = CASE
                            WHEN dispatch_date IS NOT NULL
@@ -286,6 +331,9 @@ def reject_budget(budget_id):
     final      = bool(data.get("final", False))
     new_status = "REJECTED" if final else "PENDING_ACTION"
 
+    if user.get("role") not in ("admin", "boss"):
+        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+
     try:
         with db_cursor() as cur:
             cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
@@ -298,7 +346,7 @@ def reject_budget(budget_id):
             cur.execute(
                 """UPDATE budget.budget_requests
                    SET expert_decision = '退件',
-                       expert_comment  = %s,
+                       expert_comment  = COALESCE(NULLIF(%s, ''), expert_comment),
                        sign_date       = CASE WHEN %s THEN NOW() ELSE sign_date END,
                        status          = %s
                    WHERE id = %s
