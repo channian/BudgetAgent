@@ -38,28 +38,36 @@ function LibraryPage() {
 }
 
 function AssignmentPage() {
-  const [cases,       setCases]       = React.useState([]);
+  const [aiCases,     setAiCases]     = React.useState([]);
+  const [dispatched,  setDispatched]  = React.useState([]);
   const [loading,     setLoading]     = React.useState(true);
   const [experts,     setExperts]     = React.useState([]);
   const [forms,       setForms]       = React.useState({});   // {dbId: {budget_no, expert_name}}
   const [dispatching, setDispatching] = React.useState({});   // {dbId: true}
-  const [done,        setDone]        = React.useState({});   // {dbId: true}
-  const [errMsg,      setErrMsg]      = React.useState({});   // {dbId: "error"}
+  const [doneInfo,    setDoneInfo]    = React.useState({});   // {dbId: updatedBudget}
+  const [errMsg,      setErrMsg]      = React.useState({});
 
   const load = async () => {
     setLoading(true);
     try {
-      const [data, users] = await Promise.all([
+      const [pending, completed, users] = await Promise.all([
         API.fetchBudgets("pending"),
+        API.fetchBudgets("completed"),
         API.fetchUsers(),
       ]);
-      const ai = data.filter(b => b.status === "AI_REVIEW");
-      setCases(ai);
+      const ai   = pending.filter(b => b.status === "AI_REVIEW");
+      const sent = [
+        ...pending.filter(b => b.status !== "AI_REVIEW"),
+        ...completed.filter(b => b.dispatchDate),
+      ].sort((a, b) => (b.dispatchDate || 0) - (a.dispatchDate || 0));
+
+      setAiCases(ai);
+      setDispatched(sent);
       setExperts(users.filter(u => u.role === "expert"));
       const init = {};
       ai.forEach(b => { init[b.dbId] = { budget_no: b.budgetNo || "", expert_name: b.expertName || "" }; });
       setForms(init);
-      setDone({}); setErrMsg({});
+      setDoneInfo({}); setErrMsg({});
     } catch (e) {
       setErrMsg({ _global: e.message });
     } finally {
@@ -76,18 +84,21 @@ function AssignmentPage() {
     setDispatching(d => ({ ...d, [b.dbId]: true }));
     setErrMsg(e => { const n = { ...e }; delete n[b.dbId]; return n; });
     try {
-      await API.dispatch(b.dbId, forms[b.dbId] || {});
-      setDone(d => ({ ...d, [b.dbId]: true }));
+      const updated = await API.dispatch(b.dbId, forms[b.dbId] || {});
+      setDoneInfo(d => ({ ...d, [b.dbId]: updated }));
       setTimeout(() => {
-        setCases(cs => cs.filter(c => c.dbId !== b.dbId));
-        setDone(d => { const n = { ...d }; delete n[b.dbId]; return n; });
-      }, 1800);
+        setAiCases(cs => cs.filter(c => c.dbId !== b.dbId));
+        setDispatched(ds => [updated, ...ds]);
+        setDoneInfo(d => { const n = { ...d }; delete n[b.dbId]; return n; });
+      }, 2000);
     } catch (e) {
       setErrMsg(err => ({ ...err, [b.dbId]: e.message }));
     } finally {
       setDispatching(d => ({ ...d, [b.dbId]: false }));
     }
   };
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString("zh-TW") : "—";
 
   return (
     <>
@@ -107,15 +118,16 @@ function AssignmentPage() {
         </div>
       )}
 
+      {/* ── 待派發 ── */}
       <div className="card">
         <div className="card-head">
           <h3>待派發案件 <span className="tag">AI_REVIEW</span></h3>
-          <span className="hint">{loading ? "載入中…" : `${cases.length} 件待派發`}</span>
+          <span className="hint">{loading ? "載入中…" : `${aiCases.length} 件待派發`}</span>
         </div>
         <div className="card-body tight">
           {loading ? (
             <div className="empty">載入中…</div>
-          ) : cases.length === 0 ? (
+          ) : aiCases.length === 0 ? (
             <div className="empty">🎉 目前沒有待派發案件</div>
           ) : (
             <>
@@ -128,11 +140,12 @@ function AssignmentPage() {
                 <div>負責專家</div>
                 <div></div>
               </div>
-              {cases.map(b => {
-                const f      = forms[b.dbId] || {};
-                const isDone = done[b.dbId];
-                const isBusy = dispatching[b.dbId];
-                const err    = errMsg[b.dbId];
+              {aiCases.map(b => {
+                const f       = forms[b.dbId] || {};
+                const info    = doneInfo[b.dbId];
+                const isDone  = !!info;
+                const isBusy  = dispatching[b.dbId];
+                const err     = errMsg[b.dbId];
                 return (
                   <div key={b.dbId} className={`dispatch-row ${isDone ? "dispatched" : ""}`}>
                     <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
@@ -174,19 +187,56 @@ function AssignmentPage() {
                       )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                      {isDone
-                        ? <span className="badge ok" style={{ whiteSpace: "nowrap" }}>✓ 已派發</span>
-                        : <button
-                            className="btn sm accent"
-                            onClick={() => doDispatch(b)}
-                            disabled={isBusy}
-                          >{isBusy ? "派發中…" : "派發"}</button>
-                      }
+                      {isDone ? (
+                        <span className="badge ok" style={{ whiteSpace: "nowrap" }}>
+                          ✓ 已派發給 {info.expertName || "（未指定）"}
+                        </span>
+                      ) : (
+                        <button
+                          className="btn sm accent"
+                          onClick={() => doDispatch(b)}
+                          disabled={isBusy}
+                        >{isBusy ? "派發中…" : "派發"}</button>
+                      )}
                       {err && <span style={{ fontSize: 10.5, color: "var(--bad)" }}>{err}</span>}
                     </div>
                   </div>
                 );
               })}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── 已派發 ── */}
+      <div className="card">
+        <div className="card-head">
+          <h3>已派發案件</h3>
+          <span className="hint">{dispatched.length} 件</span>
+        </div>
+        <div className="card-body tight">
+          {dispatched.length === 0 ? (
+            <div className="empty">尚無已派發案件</div>
+          ) : (
+            <>
+              <div className="sent-row head">
+                <div>週</div>
+                <div>項目名稱</div>
+                <div>預算單號</div>
+                <div>負責專家</div>
+                <div>派發日期</div>
+                <div>狀態</div>
+              </div>
+              {dispatched.map(b => (
+                <div key={b.dbId} className="sent-row">
+                  <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
+                  <div className="nm" title={b.project}>{b.project}</div>
+                  <div className="mono" style={{ fontSize: 12 }}>{b.budgetNo || <span style={{ color: "var(--text-muted)" }}>—</span>}</div>
+                  <div>{b.expertName || <span style={{ color: "var(--text-muted)" }}>未指定</span>}</div>
+                  <div className="mono" style={{ fontSize: 12 }}>{fmtDate(b.dispatchDate)}</div>
+                  <div><StatusBadge status={b.status}/></div>
+                </div>
+              ))}
             </>
           )}
         </div>

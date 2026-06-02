@@ -1327,6 +1327,30 @@ table.dt .owner-cell .dp { font-size: 11px; color: var(--text-muted); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* Already-dispatched list */
+.sent-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 150px 130px 110px 130px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  font-size: 13px;
+}
+.sent-row:last-child { border-bottom: none; }
+.sent-row.head {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--surface-2);
+  font-weight: 600;
+  padding: 8px 18px;
+}
+.sent-row .nm {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 .cell-input {
   width: 100%;
   border: 1.5px solid var(--border);
