@@ -188,7 +188,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         <div className="kpi k-purple">
           <div className="glyph"><Icon.Sparkles s={18}/></div>
           <div className="lbl">合計金額</div>
-          <div className="val tnum">NT$ {fmtAmount(Math.round(totalAmt))}</div>
+          <div className="val tnum">NT$ {fmtAmount(totalAmt)}</div>
           <div className="delta">本期度</div>
         </div>
         <div className="kpi k-green">

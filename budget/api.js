@@ -179,6 +179,16 @@ async function apiResubmitBudget(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/resubmit`, { method: "POST" });
   return dbToFrontend(d.budget);
 }
+async function apiDispatchBudget(dbId, form) {
+  const d = await apiFetch(`/api/budgets/${dbId}/dispatch`, {
+    method: "POST",
+    body: JSON.stringify({
+      budget_no:   form.budget_no   || null,
+      expert_name: form.expert_name || null,
+    }),
+  });
+  return dbToFrontend(d.budget);
+}
 async function apiFetchTimeline(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/timeline`);
   return d.timeline || [];
@@ -257,6 +267,7 @@ window.API = {
   approve:             apiApproveBudget,
   reject:              apiRejectBudget,
   resubmit:            apiResubmitBudget,
+  dispatch:            apiDispatchBudget,
   fetchTimeline:       apiFetchTimeline,
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,

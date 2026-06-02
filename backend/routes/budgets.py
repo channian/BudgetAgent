@@ -171,6 +171,67 @@ def update_budget(budget_id):
     return jsonify(budget=after)
 
 
+# ── Dispatch (AI_REVIEW → EXPERT_REVIEW) ─────────────────────────────
+@budgets_bp.post("/budgets/<int:budget_id>/dispatch")
+@require_auth
+def dispatch_budget(budget_id):
+    user = current_user()
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行派發"), 403
+
+    data        = request.json or {}
+    budget_no   = (data.get("budget_no")   or "").strip() or None
+    expert_name = (data.get("expert_name") or "").strip() or None
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
+            before_row = cur.fetchone()
+        if not before_row:
+            return jsonify(error="案件不存在"), 404
+        before = row_to_dict(before_row)
+        if before["status"] != "AI_REVIEW":
+            return jsonify(error=f"只有 AI_REVIEW 狀態的案件可派發（目前：{before['status']}）"), 400
+
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests
+                   SET budget_no    = COALESCE(%s, budget_no),
+                       expert_name  = COALESCE(%s, expert_name),
+                       dispatch_date = NOW(),
+                       status        = 'EXPERT_REVIEW'
+                   WHERE id = %s
+                   RETURNING *""",
+                (budget_no, expert_name, budget_id),
+            )
+            after = row_to_dict(cur.fetchone())
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    audit_log(budget_id, "DISPATCH", user.get("name", "system"), before, after)
+    assigned = after.get("expert_name") or "未指定"
+    _notify_roles(["admin"],
+        f"📤 {user.get('name','系統')} 派發案件「{before['project_name']}」(#{budget_id})，"
+        f"指派專家：{assigned}。")
+    # Notify the individual expert by name
+    if after.get("expert_name"):
+        try:
+            with db_cursor() as cur:
+                cur.execute("SELECT id FROM budget.users WHERE name = %s",
+                            (after["expert_name"],))
+                eu = cur.fetchone()
+            if eu:
+                with db_cursor(commit=True) as cur:
+                    cur.execute(
+                        "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
+                        (eu["id"],
+                         f"📋 案件「{before['project_name']}」(#{budget_id}) 已派發給您，請盡速審核。"),
+                    )
+        except Exception:
+            pass
+    return jsonify(budget=after)
+
+
 # ── Approve (CLOSED) ──────────────────────────────────────────────────
 @budgets_bp.post("/budgets/<int:budget_id>/approve")
 @require_auth

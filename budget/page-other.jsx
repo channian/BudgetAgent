@@ -38,85 +38,157 @@ function LibraryPage() {
 }
 
 function AssignmentPage() {
-  const rules = [
-    { cat: "研發費用 RD", agent: "BSV + VND", reviewer: "陳建宏 / 李怡君", th: "≥ NT$ 500K 升級至專家複審" },
-    { cat: "行銷推廣 MKT", agent: "BSV + PLC", reviewer: "林淑芬 / 吳明達", th: "≥ NT$ 1M 升級至專家複審" },
-    { cat: "資訊系統 IT", agent: "BSV + DUP + VND", reviewer: "黃志明 / 蔡心怡", th: "≥ NT$ 800K 升級至專家複審" },
-    { cat: "人力資源 HR", agent: "BSV + PLC", reviewer: "張雅婷", th: "≥ NT$ 300K 升級至專家複審" },
-    { cat: "營運支援 OPS", agent: "BSV", reviewer: "王俊傑", th: "≥ NT$ 200K 升級至專家複審" },
-  ];
+  const [cases,       setCases]       = React.useState([]);
+  const [loading,     setLoading]     = React.useState(true);
+  const [experts,     setExperts]     = React.useState([]);
+  const [forms,       setForms]       = React.useState({});   // {dbId: {budget_no, expert_name}}
+  const [dispatching, setDispatching] = React.useState({});   // {dbId: true}
+  const [done,        setDone]        = React.useState({});   // {dbId: true}
+  const [errMsg,      setErrMsg]      = React.useState({});   // {dbId: "error"}
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [data, users] = await Promise.all([
+        API.fetchBudgets("pending"),
+        API.fetchUsers(),
+      ]);
+      const ai = data.filter(b => b.status === "AI_REVIEW");
+      setCases(ai);
+      setExperts(users.filter(u => u.role === "expert"));
+      const init = {};
+      ai.forEach(b => { init[b.dbId] = { budget_no: b.budgetNo || "", expert_name: b.expertName || "" }; });
+      setForms(init);
+      setDone({}); setErrMsg({});
+    } catch (e) {
+      setErrMsg({ _global: e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  React.useEffect(() => { load(); }, []);
+
+  const setField = (dbId, field, val) =>
+    setForms(f => ({ ...f, [dbId]: { ...(f[dbId] || {}), [field]: val } }));
+
+  const doDispatch = async (b) => {
+    setDispatching(d => ({ ...d, [b.dbId]: true }));
+    setErrMsg(e => { const n = { ...e }; delete n[b.dbId]; return n; });
+    try {
+      await API.dispatch(b.dbId, forms[b.dbId] || {});
+      setDone(d => ({ ...d, [b.dbId]: true }));
+      setTimeout(() => {
+        setCases(cs => cs.filter(c => c.dbId !== b.dbId));
+        setDone(d => { const n = { ...d }; delete n[b.dbId]; return n; });
+      }, 1800);
+    } catch (e) {
+      setErrMsg(err => ({ ...err, [b.dbId]: e.message }));
+    } finally {
+      setDispatching(d => ({ ...d, [b.dbId]: false }));
+    }
+  };
+
   return (
     <>
       <div className="page-head">
         <div>
-          <h2>派發中心人員設定</h2>
-          <div className="lede">設定不同類別的 AI 代理組合、複審人員與升級門檻</div>
+          <h2>派發中心</h2>
+          <div className="lede">為 AI 初審完成的案件填入預算單號與負責專家，派發後進入專家審核流程</div>
         </div>
         <div className="actions">
-          <button className="btn"><Icon.Refresh/>同步 HR 名單</button>
-          <button className="btn accent"><Icon.Plus/>新增規則</button>
+          <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h3>派發規則 <span className="tag">DISPATCH RULES</span></h3>
-          <span className="hint">{rules.length} 條 · 最後更新 2026-05-18 14:32</span>
+      {errMsg._global && (
+        <div style={{ padding: "8px 14px", background: "var(--bad-soft)", color: "var(--bad)", borderRadius: "var(--radius)", fontSize: 12 }}>
+          ⚠ {errMsg._global}
         </div>
-        <div className="card-body tight">
-          <div className="user-row head">
-            <div>類別</div>
-            <div>AI Agent 組合</div>
-            <div>專家複審名單</div>
-            <div>升級門檻</div>
-            <div style={{ textAlign: "right" }}>狀態</div>
-          </div>
-          {rules.map((r, i) => (
-            <div className="user-row" key={i}>
-              <div className="nm">
-                <span className="tag-sm">{r.cat.split(" ")[1]}</span>
-                <span>{r.cat.split(" ")[0]}</span>
-              </div>
-              <div className="mono" style={{ fontSize: 11.5, color: "var(--accent-strong)" }}>{r.agent}</div>
-              <div>{r.reviewer}</div>
-              <div className="mono" style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{r.th}</div>
-              <div style={{ textAlign: "right" }}>
-                <span className="toggle on" style={{ display: "inline-block", verticalAlign: "middle" }}/>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
       <div className="card">
         <div className="card-head">
-          <h3>複審人員工作量 <span className="tag">LOAD</span></h3>
-          <span className="hint">今日</span>
+          <h3>待派發案件 <span className="tag">AI_REVIEW</span></h3>
+          <span className="hint">{loading ? "載入中…" : `${cases.length} 件待派發`}</span>
         </div>
         <div className="card-body tight">
-          {MOCK.OWNERS.slice(0, 5).map((o, i) => {
-            const load = [82, 64, 47, 31, 18][i];
-            return (
-              <div key={o.id} className="user-row" style={{ gridTemplateColumns: "200px 1fr 80px" }}>
-                <div className="nm">
-                  <div className="av">{o.initial}</div>
-                  <div>
-                    {o.name}
-                    <small>{o.dept}</small>
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ flex: 1, height: 8, background: "var(--surface-2)", borderRadius: 4, overflow: "hidden", border: "1px solid var(--border)" }}>
-                    <div style={{ width: `${load}%`, height: "100%", background: load > 70 ? "var(--warn)" : "var(--accent)" }}/>
-                  </div>
-                  <span className="mono" style={{ fontSize: 11, width: 36, textAlign: "right", color: "var(--text-muted)" }}>{load}%</span>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <button className="btn sm ghost"><Icon.More/></button>
-                </div>
+          {loading ? (
+            <div className="empty">載入中…</div>
+          ) : cases.length === 0 ? (
+            <div className="empty">🎉 目前沒有待派發案件</div>
+          ) : (
+            <>
+              <div className="dispatch-row head">
+                <div>週</div>
+                <div>項目名稱</div>
+                <div>類別</div>
+                <div>金額</div>
+                <div>預算單號</div>
+                <div>負責專家</div>
+                <div></div>
               </div>
-            );
-          })}
+              {cases.map(b => {
+                const f      = forms[b.dbId] || {};
+                const isDone = done[b.dbId];
+                const isBusy = dispatching[b.dbId];
+                const err    = errMsg[b.dbId];
+                return (
+                  <div key={b.dbId} className={`dispatch-row ${isDone ? "dispatched" : ""}`}>
+                    <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
+                    <div className="nm" title={b.project}>{b.project}</div>
+                    <div><CategoryChip id={b.categoryId} name={b.category}/></div>
+                    <div className="mono" style={{ textAlign: "right", fontSize: 12.5 }}>
+                      NT$ {fmtAmount(b.amount)}
+                    </div>
+                    <div>
+                      <input
+                        className="cell-input"
+                        placeholder="填入預算單號"
+                        value={f.budget_no || ""}
+                        onChange={e => setField(b.dbId, "budget_no", e.target.value)}
+                        disabled={isDone || isBusy}
+                      />
+                    </div>
+                    <div>
+                      {experts.length > 0 ? (
+                        <select
+                          className="cell-input"
+                          value={f.expert_name || ""}
+                          onChange={e => setField(b.dbId, "expert_name", e.target.value)}
+                          disabled={isDone || isBusy}
+                        >
+                          <option value="">— 選擇專家 —</option>
+                          {experts.map(ex => (
+                            <option key={ex.id} value={ex.name}>{ex.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="cell-input"
+                          placeholder="填入專家姓名"
+                          value={f.expert_name || ""}
+                          onChange={e => setField(b.dbId, "expert_name", e.target.value)}
+                          disabled={isDone || isBusy}
+                        />
+                      )}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                      {isDone
+                        ? <span className="badge ok" style={{ whiteSpace: "nowrap" }}>✓ 已派發</span>
+                        : <button
+                            className="btn sm accent"
+                            onClick={() => doDispatch(b)}
+                            disabled={isBusy}
+                          >{isBusy ? "派發中…" : "派發"}</button>
+                      }
+                      {err && <span style={{ fontSize: 10.5, color: "var(--bad)" }}>{err}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
     </>
