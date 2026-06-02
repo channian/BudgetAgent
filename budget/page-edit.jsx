@@ -105,12 +105,12 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                   />
                 </div>
                 <div className="field">
-                  <label>判定類別 <span className="opt">(選填)</span></label>
+                  <label>系統 <span className="opt">(選填)</span></label>
                   <input
                     type="text"
                     value={form.subCategory}
                     onChange={(e) => set("subCategory", e.target.value)}
-                    placeholder="例：軟體授權"
+                    placeholder="例：ERP 採購系統"
                   />
                 </div>
               </div>
