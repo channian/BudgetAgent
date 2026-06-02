@@ -20,10 +20,27 @@ const DEFAULT_COLS = [
 const PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"];
 const COMPLETED_STATUSES = ["CLOSED", "REJECTED"];
 
-function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUser }) {
+function CopyBtn({ text }) {
+  const [done, setDone] = React.useState(false);
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text || "").then(() => {
+      setDone(true);
+      setTimeout(() => setDone(false), 1500);
+    }).catch(() => {});
+  };
+  return (
+    <button className="copy-btn" title="複製" onClick={handleCopy}>
+      {done ? "✓" : <Icon.Copy s={11} />}
+    </button>
+  );
+}
+
+function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUser, onApprove }) {
   const isPending = scope === "pending";
   const isViewer  = (currentUser?.role || "viewer") === "viewer";
-  // API already scopes the data; client-side filter is a safety net
+  const showBatch = isPending && !isViewer && !!onApprove;
+
   const filtered = budgets.filter((b) =>
     isPending ? PENDING_STATUSES.includes(b.status)
               : COMPLETED_STATUSES.includes(b.status)
@@ -33,6 +50,8 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const [aiFilter, setAiFilter] = React.useState("all");
   const [sort, setSort] = React.useState({ k: "dispatchDate", dir: "desc" });
   const [cols, setCols] = React.useState(DEFAULT_COLS);
+  const [selected, setSelected] = React.useState(new Set());
+  const [batchBusy, setBatchBusy] = React.useState(false);
 
   // Export / import
   const exportScope = isPending ? "pending" : "completed";
@@ -48,7 +67,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const doImport = async (e) => {
     const file = e.target.files && e.target.files[0];
-    e.target.value = "";   // allow re-selecting the same file
+    e.target.value = "";
     if (!file) return;
     setBusy("import");
     try {
@@ -102,11 +121,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     window.addEventListener("mouseup", onUp);
   };
 
-  const resetCols = () => {
-    setCols(DEFAULT_COLS);
-    try { localStorage.removeItem(storeKey); } catch {}
-  };
-
   const rows = React.useMemo(() => {
     let r = filtered;
     if (q.trim()) {
@@ -134,13 +148,56 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   };
   const arr = (k) => sort.k === k ? (sort.dir === "asc" ? "▲" : "▼") : "▾";
 
+  // Batch selection
+  const expertRows = rows.filter(r => r.status === "EXPERT_REVIEW");
+  const allSelected = expertRows.length > 0 && expertRows.every(r => selected.has(r.dbId));
+  const someSelected = expertRows.some(r => selected.has(r.dbId));
+
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(expertRows.map(r => r.dbId)));
+  };
+
+  const toggleRow = (dbId) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(dbId)) next.delete(dbId); else next.add(dbId);
+      return next;
+    });
+  };
+
+  const batchApprove = async () => {
+    if (!selected.size || !onApprove) return;
+    setBatchBusy(true);
+    const toApprove = rows.filter(r => selected.has(r.dbId) && r.status === "EXPERT_REVIEW");
+    for (const b of toApprove) {
+      try { await onApprove(b, ""); } catch {}
+    }
+    setSelected(new Set());
+    setBatchBusy(false);
+    onRefresh && onRefresh();
+  };
+
+  const handleInlineApprove = async (e, b) => {
+    e.stopPropagation();
+    if (!onApprove) return;
+    try {
+      await onApprove(b, "");
+      onRefresh && onRefresh();
+    } catch (err) {
+      alert("簽核失敗：" + err.message);
+    }
+  };
+
   const totalAmt = rows.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const aiApprovedCnt = rows.filter((b) => b.aiResult === "approve").length;
   const overSLA = rows.filter((b) => {
     if (!PENDING_STATUSES.includes(b.status)) return false;
-    const ref = new Date();
-    return (ref - b.dispatchDate) / 86400000 > 3;
+    return (new Date() - b.dispatchDate) / 86400000 > 3;
   }).length;
+
+  const chkW = 36;
+  const actW = 90;
+  const extraW = showBatch ? chkW + actW : 0;
 
   return (
     <>
@@ -164,17 +221,9 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <button className="btn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy === "import"}>
             <Icon.Upload/>{busy === "import" ? "匯入中…" : "匯入 CSV/XLSX"}
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,.xlsx"
-            style={{ display: "none" }}
-            onChange={doImport}
-          />
+          <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImport} />
           {isPending && !isViewer && (
-            <button className="btn accent" onClick={onNew}>
-              <Icon.Plus/>建立預算單
-            </button>
+            <button className="btn accent" onClick={onNew}><Icon.Plus/>建立預算單</button>
           )}
         </div>
       </div>
@@ -209,11 +258,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       <div className="toolbar">
         <div className="search">
           <Icon.Search/>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜尋預算單號、項目名稱、負責人…"
-          />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋預算單號、項目名稱、負責人…" />
           <kbd>⌘K</kbd>
         </div>
         <div className="divider"/>
@@ -224,6 +269,11 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <option value="hold">AI 無法判定</option>
         </select>
         <div className="spacer-x"/>
+        {showBatch && selected.size > 0 && (
+          <button className="btn accent" onClick={batchApprove} disabled={batchBusy}>
+            {batchBusy ? "簽核中…" : `一鍵簽核 (${selected.size})`}
+          </button>
+        )}
         <span className="hint">{rows.length} / {filtered.length} 筆</span>
       </div>
 
@@ -232,12 +282,25 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <div className="empty">查無符合條件之案件</div>
         ) : (
           <div className="table-scroll">
-            <table className="dt" style={{ width: cols.reduce((s, c) => s + c.w, 0) }}>
+            <table className="dt" style={{ width: extraW + cols.reduce((s, c) => s + c.w, 0) }}>
               <colgroup>
+                {showBatch && <col style={{ width: chkW }}/>}
                 {cols.map((c) => <col key={c.k} style={{ width: c.w }}/>)}
+                {showBatch && <col style={{ width: actW }}/>}
               </colgroup>
               <thead>
                 <tr>
+                  {showBatch && (
+                    <th className="col-chk" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                        onChange={toggleAll}
+                        title="全選專家審核中案件"
+                      />
+                    </th>
+                  )}
                   {cols.map((c, idx) => (
                     <th
                       key={c.k}
@@ -261,11 +324,19 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
                       )}
                     </th>
                   ))}
+                  {showBatch && <th className="col-act">操作</th>}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((b) => (
-                  <tr key={b.id} onClick={() => onRow(b)}>
+                  <tr key={b.id} onClick={() => onRow(b)} className={selected.has(b.dbId) ? "row-selected" : ""}>
+                    {showBatch && (
+                      <td className="col-chk" onClick={(e) => e.stopPropagation()}>
+                        {b.status === "EXPERT_REVIEW" && (
+                          <input type="checkbox" checked={selected.has(b.dbId)} onChange={() => toggleRow(b.dbId)} />
+                        )}
+                      </td>
+                    )}
                     {cols.map((c) => (
                       <td key={c.k} style={{ textAlign: c.align || "left" }} className={
                         c.k === "amount" ? "col-amt" :
@@ -274,6 +345,15 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
                         {renderCell(b, c.k)}
                       </td>
                     ))}
+                    {showBatch && (
+                      <td className="col-act" onClick={(e) => e.stopPropagation()}>
+                        {b.status === "EXPERT_REVIEW" && (
+                          <button className="btn-approve-sm" onClick={(e) => handleInlineApprove(e, b)}>
+                            ✓ 簽核
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -301,16 +381,22 @@ function renderCell(b, k) {
           <Conf value={b.aiConfidence}/>
         </span>
         {b.aiReason && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }} title={b.aiReason}>
-            {b.aiReason}
+          <span className="flex-row" style={{ gap: 4, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 195 }} title={b.aiReason}>
+              {b.aiReason}
+            </span>
+            <CopyBtn text={b.aiReason} />
           </span>
         )}
       </div>
     );
     case "expertResult":  return <ResultBadge result={b.expertResult}/>;
     case "expertComment": return b.expertComment
-      ? <span style={{ fontSize: 12, color: "var(--text-muted)" }} title={b.expertComment}>
-          {b.expertComment.length > 28 ? b.expertComment.slice(0, 28) + "…" : b.expertComment}
+      ? <span className="flex-row" style={{ gap: 4, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }} title={b.expertComment}>
+            {b.expertComment.length > 24 ? b.expertComment.slice(0, 24) + "…" : b.expertComment}
+          </span>
+          <CopyBtn text={b.expertComment} />
         </span>
       : <span style={{ color: "var(--text-muted)" }}>—</span>;
     case "status":       return <StatusBadge status={b.status}/>;

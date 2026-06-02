@@ -15,6 +15,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
   const [decision, setDecision] = React.useState(budget.expertResult);
   const [timeline, setTimeline] = React.useState([]);
   const [tlLoading, setTlLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
 
   const role     = currentUser?.role || "viewer";
   const isViewer = role === "viewer";
@@ -32,14 +33,15 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
       .finally(() => setTlLoading(false));
   }, [budget.dbId]);
 
-  const submitFinal = () => {
-    if (!decision) return;
-    if (decision === "approve") onApprove(budget, comment);
-    else onReject(budget, comment, true);   // final REJECTED
-  };
-
-  const submitReturn = () => {
-    onReturn(budget, comment);              // PENDING_ACTION
+  const submitFinal = async () => {
+    if (!decision || busy) return;
+    setBusy(true);
+    try {
+      if (decision === "approve") await onApprove(budget, comment);
+      else await onReject(budget, comment, true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -148,11 +150,8 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onEdit, cur
                   </div>
 
                   <div className="flex-row" style={{ marginTop: 18, gap: 8 }}>
-                    <button className="btn primary" disabled={!decision} onClick={submitFinal}>
-                      確認簽核
-                    </button>
-                    <button className="btn" onClick={submitReturn}>
-                      退回申請人補件
+                    <button className="btn primary" disabled={!decision || busy} onClick={submitFinal}>
+                      {busy ? "送出中…" : "確認簽核"}
                     </button>
                     <span className="spacer-x" />
                     <span className="hint">簽核後不可變更，將同步至 ERP</span>

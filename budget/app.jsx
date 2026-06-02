@@ -157,6 +157,10 @@ function App() {
     } catch (e) { setApiError(e.message); }
   };
 
+  const inlineApprove = async (b, comment = "") => {
+    await API.approve(b.dbId, comment);
+  };
+
   const saveNew = async (form) => {
     try {
       if (currentBudget) {
@@ -180,7 +184,7 @@ function App() {
   let body   = null;
 
   if (route === "pending") {
-    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} />;
+    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} onApprove={inlineApprove} />;
     crumbs = ["待簽核"];
   } else if (route === "approved") {
     body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} currentUser={user} />;

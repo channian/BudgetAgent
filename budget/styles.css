@@ -1390,3 +1390,62 @@ body.is-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
+
+/* ── Copy button ── */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-subtle);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.copy-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* ── Checkbox + action columns ── */
+table.dt .col-chk {
+  width: 36px;
+  padding: 0 8px;
+  text-align: center;
+}
+table.dt .col-act {
+  width: 90px;
+  padding: 4px 8px;
+  text-align: center;
+}
+table.dt tbody tr.row-selected {
+  background: var(--accent-soft);
+}
+
+/* ── Inline approve button ── */
+.btn-approve-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid oklch(from var(--ok) l c h / 0.3);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.btn-approve-sm:hover {
+  background: var(--ok);
+  color: white;
+}
