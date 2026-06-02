@@ -1,38 +1,334 @@
 /* Library / Assignment / Permissions pages */
 
-function LibraryPage() {
+const DISPOSITIONS = ["通過", "退件", "不適用"];
+const EMPTY_ENTRY  = { title: "", keywords: "", content: "", example: "", disposition: "", note: "" };
+
+function LibraryPage({ currentUser }) {
+  const role    = currentUser?.role || "viewer";
+  const isAdmin = role === "admin";
+
+  const [systems, setSystems] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err,     setErr]     = React.useState("");
+  const [active,  setActive]  = React.useState(null);   // selected system → RAG detail
+
+  // system create/rename modal: null | "new" | system-object
+  const [sysModal, setSysModal] = React.useState(null);
+  const [sysForm,  setSysForm]  = React.useState({ name: "", description: "" });
+  const [sysBusy,  setSysBusy]  = React.useState(false);
+  const [sysErr,   setSysErr]   = React.useState("");
+
+  const load = () => {
+    setLoading(true);
+    API.fetchRagSystems()
+      .then(rows => { setSystems(rows); setErr(""); })
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
+  };
+  React.useEffect(load, []);
+
+  const openNewSys  = () => { setSysForm({ name: "", description: "" }); setSysErr(""); setSysModal("new"); };
+  const openEditSys = (s) => { setSysForm({ name: s.name, description: s.description || "" }); setSysErr(""); setSysModal(s); };
+  const closeSys    = () => setSysModal(null);
+
+  const saveSys = async () => {
+    if (!sysForm.name.trim()) { setSysErr("系統名稱為必填"); return; }
+    setSysBusy(true); setSysErr("");
+    try {
+      if (sysModal === "new") await API.createRagSystem(sysForm);
+      else                    await API.updateRagSystem(sysModal.id, sysForm);
+      closeSys();
+      load();
+    } catch (e) { setSysErr(e.message); }
+    finally     { setSysBusy(false); }
+  };
+
+  const deleteSys = async (s) => {
+    if (!confirm(`確定刪除「${s.name}」？此系統下所有 RAG 資料將一併刪除。`)) return;
+    try { await API.deleteRagSystem(s.id); load(); }
+    catch (e) { alert("刪除失敗：" + e.message); }
+  };
+
+  // ── RAG detail view ──
+  if (active) {
+    return (
+      <RagSystemDetail
+        system={active}
+        currentUser={currentUser}
+        onBack={() => { setActive(null); load(); }}
+      />
+    );
+  }
+
+  // ── System grid ──
   return (
     <>
       <div className="page-head">
         <div>
           <h2>AI Agent 圖書館</h2>
-          <div className="lede">集中管理派發中心可調用的 AI 模型與規則</div>
+          <div className="lede">依系統分類管理 AI 審核知識庫（RAG），點入各系統可建立與篩選審核規則</div>
         </div>
         <div className="actions">
-          <button className="btn"><Icon.Filter/>篩選</button>
-          <button className="btn accent"><Icon.Plus/>註冊新 Agent</button>
+          <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
+          {isAdmin && <button className="btn accent" onClick={openNewSys}><Icon.Plus/>新增系統類別</button>}
         </div>
       </div>
 
-      <div className="agent-grid">
-        {MOCK.AGENTS.map((a) => (
-          <div key={a.id} className="agent-card">
-            <div className="head">
-              <div className="av">{a.id}</div>
-              <div className="meta">
-                <h4>{a.name}</h4>
-                <div className="ver">{a.ver} · ONLINE</div>
+      {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
+
+      {loading ? (
+        <div className="empty">載入中…</div>
+      ) : systems.length === 0 ? (
+        <div className="empty">尚無系統類別{isAdmin ? "，請點右上角「新增系統類別」" : ""}</div>
+      ) : (
+        <div className="sys-grid">
+          {systems.map((s) => (
+            <div key={s.id} className="sys-card" onClick={() => setActive(s)}>
+              <div className="sys-card-top">
+                <div className="sys-av"><Icon.Book s={18}/></div>
+                {isAdmin && (
+                  <div className="sys-card-actions" onClick={(e) => e.stopPropagation()}>
+                    <button className="btn ghost sm" title="重新命名" onClick={() => openEditSys(s)}>✎</button>
+                    <button className="btn ghost sm" title="刪除" onClick={() => deleteSys(s)}>✕</button>
+                  </div>
+                )}
               </div>
-              <span className="badge ok"><span className="b-dot"/>運行中</span>
+              <h4 className="sys-name">{s.name}</h4>
+              {s.description && <div className="sys-desc">{s.description}</div>}
+              <div className="sys-meta">
+                <span className="sys-count">{s.entry_count}</span> 筆 RAG 資料
+              </div>
             </div>
-            <div className="desc">{a.desc}</div>
-            <div className="stats">
-              <span><b>{a.calls}</b>近 30 日呼叫</span>
-              <span><b>{a.acc}</b>準確率</span>
+          ))}
+        </div>
+      )}
+
+      {/* ── System create / rename modal ── */}
+      {sysModal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 200, display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && closeSys()}>
+          <div className="card" style={{ width: 420, maxWidth: "92vw", padding: 0 }}>
+            <div className="card-head" style={{ padding: "16px 20px" }}>
+              <h3>{sysModal === "new" ? "新增系統類別" : `重新命名：${sysModal.name}`}</h3>
+              <button className="btn ghost sm" onClick={closeSys}>✕</button>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div className="field">
+                <label>系統名稱 <span className="req">*</span></label>
+                <input type="text" value={sysForm.name} autoFocus
+                  onChange={e => setSysForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="例：ERP 採購系統"/>
+              </div>
+              <div className="field">
+                <label>說明（選填）</label>
+                <input type="text" value={sysForm.description}
+                  onChange={e => setSysForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="此系統類別的用途簡述"/>
+              </div>
+              {sysErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {sysErr}</div>}
+              <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn ghost" onClick={closeSys}>取消</button>
+                <button className="btn primary" onClick={saveSys} disabled={sysBusy}>
+                  {sysBusy ? "儲存中…" : sysModal === "new" ? "建立" : "儲存"}
+                </button>
+              </div>
             </div>
           </div>
-        ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function RagSystemDetail({ system, currentUser, onBack }) {
+  const role     = currentUser?.role || "viewer";
+  const canWrite = role !== "viewer";
+
+  const [entries, setEntries] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err,     setErr]     = React.useState("");
+
+  // filters
+  const [q,    setQ]    = React.useState("");
+  const [disp, setDisp] = React.useState("");
+
+  // entry modal: null | "new" | entry-object
+  const [modal,  setModal]  = React.useState(null);
+  const [form,   setForm]   = React.useState(EMPTY_ENTRY);
+  const [busy,   setBusy]   = React.useState(false);
+  const [mErr,   setMErr]   = React.useState("");
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    API.fetchRagEntries(system.id, { q, disposition: disp })
+      .then(rows => { setEntries(rows); setErr(""); })
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
+  }, [system.id, q, disp]);
+
+  // Debounced reload on filter change
+  React.useEffect(() => {
+    const t = setTimeout(load, 250);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  const openNew  = () => { setForm(EMPTY_ENTRY); setMErr(""); setModal("new"); };
+  const openEdit = (en) => {
+    setForm({ title: en.title || "", keywords: en.keywords || "", content: en.content || "",
+              example: en.example || "", disposition: en.disposition || "", note: en.note || "" });
+    setMErr(""); setModal(en);
+  };
+  const closeModal = () => setModal(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.title.trim()) { setMErr("標題為必填"); return; }
+    setBusy(true); setMErr("");
+    try {
+      if (modal === "new") await API.createRagEntry(system.id, form);
+      else                 await API.updateRagEntry(modal.id, form);
+      closeModal();
+      load();
+    } catch (e) { setMErr(e.message); }
+    finally     { setBusy(false); }
+  };
+
+  const remove = async (en) => {
+    if (!confirm(`確定刪除「${en.title}」？`)) return;
+    try { await API.deleteRagEntry(en.id); load(); }
+    catch (e) { alert("刪除失敗：" + e.message); }
+  };
+
+  const dispBadge = (d) =>
+    d === "通過" ? <span className="badge ok"><span className="b-dot"/>通過</span>
+  : d === "退件" ? <span className="badge bad"><span className="b-dot"/>退件</span>
+  : d           ? <span className="badge muted"><span className="b-dot"/>{d}</span>
+  :               <span style={{ color: "var(--text-muted)" }}>—</span>;
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <div className="flex-row" style={{ marginBottom: 8 }}>
+            <button className="btn ghost sm" onClick={onBack}><Icon.Back/>返回圖書館</button>
+            <span className="tag-sm">RAG 知識庫</span>
+          </div>
+          <h2 style={{ marginBottom: 2 }}>{system.name}</h2>
+          <div className="lede">{system.description || "管理此系統的 AI 審核規則與案例，供專家建立與查詢"}</div>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
+          {canWrite && <button className="btn accent" onClick={openNew}><Icon.Plus/>建立 RAG 資料</button>}
+        </div>
       </div>
+
+      <div className="toolbar">
+        <div className="search">
+          <Icon.Search/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="搜尋標題、關鍵字、內容…"/>
+        </div>
+        <div className="divider"/>
+        <select className="field-sel" value={disp} onChange={e => setDisp(e.target.value)}>
+          <option value="">全部處置</option>
+          {DISPOSITIONS.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <div className="spacer-x"/>
+        <span className="hint">{entries.length} 筆</span>
+      </div>
+
+      {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
+
+      <div className="card">
+        <div className="card-body tight">
+          {loading ? (
+            <div className="empty">載入中…</div>
+          ) : entries.length === 0 ? (
+            <div className="empty">查無 RAG 資料{canWrite ? "，可點右上角「建立 RAG 資料」新增" : ""}</div>
+          ) : (
+            <>
+              <div className="rag-row head">
+                <div>標題 / 關鍵字</div>
+                <div>內容</div>
+                <div>建議處置</div>
+                <div>建立者</div>
+                {canWrite && <div style={{ textAlign: "right" }}>操作</div>}
+              </div>
+              {entries.map(en => (
+                <div className="rag-row" key={en.id}>
+                  <div>
+                    <div className="rag-title">{en.title}</div>
+                    {en.keywords && <div className="rag-kw">{en.keywords}</div>}
+                  </div>
+                  <div className="rag-content" title={en.content || ""}>{en.content || "—"}</div>
+                  <div>{dispBadge(en.disposition)}</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>{en.created_by || "—"}</div>
+                  {canWrite && (
+                    <div style={{ textAlign: "right", display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button className="btn sm" onClick={() => openEdit(en)}>編輯</button>
+                      <button className="btn sm ghost" onClick={() => remove(en)}>刪除</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Entry create / edit modal ── */}
+      {modal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 200, display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && closeModal()}>
+          <div className="card" style={{ width: 540, maxWidth: "94vw", padding: 0, maxHeight: "90vh", overflow: "auto" }}>
+            <div className="card-head" style={{ padding: "16px 20px", position: "sticky", top: 0, background: "var(--surface)", zIndex: 1 }}>
+              <h3>{modal === "new" ? "建立 RAG 資料" : "編輯 RAG 資料"}</h3>
+              <button className="btn ghost sm" onClick={closeModal}>✕</button>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div className="field">
+                <label>標題 <span className="req">*</span></label>
+                <input type="text" value={form.title} autoFocus
+                  onChange={e => set("title", e.target.value)} placeholder="例：單筆採購逾 50 萬須附三家報價"/>
+              </div>
+              <div className="field">
+                <label>關鍵字 <span className="opt">(以逗號分隔，供搜尋篩選)</span></label>
+                <input type="text" value={form.keywords}
+                  onChange={e => set("keywords", e.target.value)} placeholder="採購, 報價, 金額門檻"/>
+              </div>
+              <div className="field">
+                <label>內容 / 判斷規則</label>
+                <textarea rows={4} value={form.content}
+                  onChange={e => set("content", e.target.value)} placeholder="說明此規則的判斷依據與適用情境…"/>
+              </div>
+              <div className="field">
+                <label>範例 <span className="opt">(選填)</span></label>
+                <textarea rows={3} value={form.example}
+                  onChange={e => set("example", e.target.value)} placeholder="實際案例或範例說明…"/>
+              </div>
+              <div className="field-row two">
+                <div className="field">
+                  <label>建議處置</label>
+                  <select value={form.disposition} onChange={e => set("disposition", e.target.value)}>
+                    <option value="">— 不指定 —</option>
+                    {DISPOSITIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>備註 <span className="opt">(選填)</span></label>
+                  <input type="text" value={form.note} onChange={e => set("note", e.target.value)} placeholder="其他補充"/>
+                </div>
+              </div>
+              {mErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {mErr}</div>}
+              <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn ghost" onClick={closeModal}>取消</button>
+                <button className="btn primary" onClick={save} disabled={busy}>
+                  {busy ? "儲存中…" : modal === "new" ? "建立" : "儲存"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

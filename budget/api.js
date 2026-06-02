@@ -246,6 +246,41 @@ async function apiImportBudgets(file) {
   return body;
 }
 
+// ── AI Library (RAG systems + entries) ───────────────────────────────
+async function apiFetchRagSystems() {
+  const d = await apiFetch("/api/rag/systems");
+  return d.systems || [];
+}
+async function apiCreateRagSystem(form) {
+  const d = await apiFetch("/api/rag/systems", { method: "POST", body: JSON.stringify(form) });
+  return d.system;
+}
+async function apiUpdateRagSystem(id, form) {
+  const d = await apiFetch(`/api/rag/systems/${id}`, { method: "PUT", body: JSON.stringify(form) });
+  return d.system;
+}
+async function apiDeleteRagSystem(id) {
+  await apiFetch(`/api/rag/systems/${id}`, { method: "DELETE" });
+}
+async function apiFetchRagEntries(sysId, filters = {}) {
+  const clean = {};
+  Object.entries(filters).forEach(([k, v]) => { if (v) clean[k] = v; });
+  const params = new URLSearchParams(clean);
+  const d = await apiFetch(`/api/rag/systems/${sysId}/entries?${params}`);
+  return d.entries || [];
+}
+async function apiCreateRagEntry(sysId, form) {
+  const d = await apiFetch(`/api/rag/systems/${sysId}/entries`, { method: "POST", body: JSON.stringify(form) });
+  return d.entry;
+}
+async function apiUpdateRagEntry(entryId, form) {
+  const d = await apiFetch(`/api/rag/entries/${entryId}`, { method: "PUT", body: JSON.stringify(form) });
+  return d.entry;
+}
+async function apiDeleteRagEntry(entryId) {
+  await apiFetch(`/api/rag/entries/${entryId}`, { method: "DELETE" });
+}
+
 // ── Notifications ─────────────────────────────────────────────────────
 async function apiFetchNotifications() {
   const d = await apiFetch("/api/notifications");
@@ -277,6 +312,15 @@ window.API = {
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
+  // AI Library
+  fetchRagSystems:     apiFetchRagSystems,
+  createRagSystem:     apiCreateRagSystem,
+  updateRagSystem:     apiUpdateRagSystem,
+  deleteRagSystem:     apiDeleteRagSystem,
+  fetchRagEntries:     apiFetchRagEntries,
+  createRagEntry:      apiCreateRagEntry,
+  updateRagEntry:      apiUpdateRagEntry,
+  deleteRagEntry:      apiDeleteRagEntry,
   // Utilities
   mapAiJsonPaste,
   dbToFrontend,

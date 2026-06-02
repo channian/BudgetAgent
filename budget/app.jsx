@@ -190,7 +190,7 @@ function App() {
     body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} currentUser={user} />;
     crumbs = ["已簽核完成"];
   } else if (route === "library") {
-    body   = <LibraryPage />;
+    body   = <LibraryPage currentUser={user} />;
     crumbs = ["AI Agent 圖書館"];
   } else if (route === "assignment") {
     body   = <AssignmentPage />;
