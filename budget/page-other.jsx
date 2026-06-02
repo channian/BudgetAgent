@@ -27,8 +27,8 @@ function LibraryPage({ currentUser }) {
   };
   React.useEffect(load, []);
 
-  const openNewSys  = () => { setSysForm({ name: "", description: "" }); setSysErr(""); setSysModal("new"); };
-  const openEditSys = (s) => { setSysForm({ name: s.name, description: s.description || "" }); setSysErr(""); setSysModal(s); };
+  const openNewSys  = () => { setSysForm({ name: "", description: "", expert_name: "" }); setSysErr(""); setSysModal("new"); };
+  const openEditSys = (s) => { setSysForm({ name: s.name, description: s.description || "", expert_name: s.expert_name || "" }); setSysErr(""); setSysModal(s); };
   const closeSys    = () => setSysModal(null);
 
   const saveSys = async () => {
@@ -96,6 +96,9 @@ function LibraryPage({ currentUser }) {
               <h4 className="sys-name">{s.name}</h4>
               {s.description && <div className="sys-desc">{s.description}</div>}
               <div className="sys-meta">
+                {s.expert_name && (
+                  <span className="sys-expert">👤 {s.expert_name}</span>
+                )}
                 <span className="sys-count">{s.entry_count}</span> 筆 RAG 資料
               </div>
             </div>
@@ -124,6 +127,12 @@ function LibraryPage({ currentUser }) {
                 <input type="text" value={sysForm.description}
                   onChange={e => setSysForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="此系統類別的用途簡述"/>
+              </div>
+              <div className="field">
+                <label>負責專家（選填）</label>
+                <input type="text" value={sysForm.expert_name}
+                  onChange={e => setSysForm(f => ({ ...f, expert_name: e.target.value }))}
+                  placeholder="例：王小明"/>
               </div>
               {sysErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {sysErr}</div>}
               <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8 }}>

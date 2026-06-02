@@ -1277,8 +1277,17 @@ table.dt .owner-cell .dp { font-size: 11px; color: var(--text-muted); }
   margin-top: 6px; padding-top: 10px;
   border-top: 1px dashed var(--border);
   font-size: 12px; color: var(--text-muted);
+  display: flex; flex-direction: column; gap: 4px;
 }
 .sys-meta .sys-count { color: var(--accent-strong); font-weight: 700; font-size: 14px; }
+.sys-expert {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text-subtle);
+  background: var(--surface-2);
+  border-radius: 20px;
+  padding: 2px 8px;
+  width: fit-content;
+}
 
 /* ── AI Library: RAG entry rows ── */
 .rag-row {

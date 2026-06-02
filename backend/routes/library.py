@@ -26,6 +26,7 @@ def init_library_schema():
                     id          SERIAL PRIMARY KEY,
                     name        VARCHAR NOT NULL,
                     description TEXT,
+                    expert_name VARCHAR,
                     sort_order  INT DEFAULT 0,
                     created_at  TIMESTAMP DEFAULT NOW()
                 );
@@ -51,6 +52,11 @@ def init_library_schema():
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rag_entries_system ON budget.rag_entries(system_id);"
             )
+            # idempotent migration: add expert_name if the table pre-dates this column
+            cur.execute("""
+                ALTER TABLE budget.rag_systems
+                ADD COLUMN IF NOT EXISTS expert_name VARCHAR;
+            """)
             # Seed 16 placeholder systems only when the table is empty
             cur.execute("SELECT COUNT(*) AS n FROM budget.rag_systems")
             if cur.fetchone()["n"] == 0:
@@ -96,9 +102,10 @@ def create_system():
     if caller.get("role") != "admin":
         return jsonify(error="僅系統管理員可新增系統類別"), 403
 
-    data = request.json or {}
-    name = (data.get("name") or "").strip()
-    desc = (data.get("description") or "").strip() or None
+    data        = request.json or {}
+    name        = (data.get("name")        or "").strip()
+    desc        = (data.get("description") or "").strip() or None
+    expert_name = (data.get("expert_name") or "").strip() or None
     if not name:
         return jsonify(error="系統名稱為必填"), 400
 
@@ -109,9 +116,9 @@ def create_system():
             )
             nxt = cur.fetchone()["nxt"]
             cur.execute(
-                """INSERT INTO budget.rag_systems (name, description, sort_order)
-                   VALUES (%s, %s, %s) RETURNING *""",
-                (name, desc, nxt),
+                """INSERT INTO budget.rag_systems (name, description, expert_name, sort_order)
+                   VALUES (%s, %s, %s, %s) RETURNING *""",
+                (name, desc, expert_name, nxt),
             )
             row = row_to_dict(cur.fetchone())
     except Exception as e:
@@ -127,18 +134,19 @@ def update_system(sys_id):
     if caller.get("role") != "admin":
         return jsonify(error="僅系統管理員可修改系統類別"), 403
 
-    data = request.json or {}
-    name = (data.get("name") or "").strip()
-    desc = (data.get("description") or "").strip() or None
+    data        = request.json or {}
+    name        = (data.get("name")        or "").strip()
+    desc        = (data.get("description") or "").strip() or None
+    expert_name = (data.get("expert_name") or "").strip() or None
     if not name:
         return jsonify(error="系統名稱為必填"), 400
 
     try:
         with db_cursor(commit=True) as cur:
             cur.execute(
-                """UPDATE budget.rag_systems SET name = %s, description = %s
+                """UPDATE budget.rag_systems SET name = %s, description = %s, expert_name = %s
                    WHERE id = %s RETURNING *""",
-                (name, desc, sys_id),
+                (name, desc, expert_name, sys_id),
             )
             row = cur.fetchone()
             if not row:
