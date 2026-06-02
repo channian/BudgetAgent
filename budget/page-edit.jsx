@@ -125,6 +125,17 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                   />
                 </div>
                 <div className="field">
+                  <label>負責專家 <span className="opt">(選填)</span></label>
+                  <input
+                    type="text"
+                    value={form.expertName}
+                    onChange={(e) => set("expertName", e.target.value)}
+                    placeholder="輸入負責專家姓名（與主畫面負責專家欄位相同）"
+                  />
+                </div>
+              </div>
+              <div className="field-row two" style={{ marginTop: 14 }}>
+                <div className="field">
                   <label>金額 (NT$) <span className="req">*</span></label>
                   <input
                     type="number"
