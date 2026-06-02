@@ -99,7 +99,12 @@ function BudgetTable({
         </thead>
         <tbody>
           {rows.map((b) => (
-            <tr key={b.id} onClick={() => onRow(b)} className={showSelect && selected.has(b.dbId) ? "row-selected" : ""}>
+            <tr key={b.id} onClick={() => {
+              // 若使用者正在選取文字（要手動複製），不要導航到詳情頁，以免選取被清除
+              const sel = window.getSelection && window.getSelection();
+              if (sel && sel.type === "Range" && String(sel).trim().length > 0) return;
+              onRow(b);
+            }} className={showSelect && selected.has(b.dbId) ? "row-selected" : ""}>
               {showSelect && (
                 <td className="col-chk" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={selected.has(b.dbId)} onChange={() => onToggleRow(b.dbId)} />
