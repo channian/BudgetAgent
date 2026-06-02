@@ -75,7 +75,6 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
         </div>
         <div className="actions">
           {!isFinal && !isViewer && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
-          <button className="btn">列印審核單</button>
           <button className="btn ghost"><Icon.More /></button>
         </div>
       </div>
