@@ -68,6 +68,32 @@ read_at          DATETIME NULL
 created_at       TIMESTAMP
 ```
 
+**budget.rag_systems** — AI 圖書館 system categories (extension table, auto-provisioned on app boot by `backend/routes/library.py::init_library_schema`; seeded with 16 placeholders "系統 01"~"系統 16" when empty)
+```
+id           SERIAL PK
+name         VARCHAR              -- system category name (renameable)
+description  TEXT NULL
+sort_order   INT DEFAULT 0
+created_at   TIMESTAMP
+```
+
+**budget.rag_entries** — RAG knowledge / rule entries per system (extension table)
+```
+id           SERIAL PK
+system_id    INT FK → rag_systems.id ON DELETE CASCADE
+title        VARCHAR              -- required
+keywords     TEXT NULL            -- comma-separated, used for search filter
+content      TEXT NULL            -- rule / judgement basis
+example      TEXT NULL
+disposition  VARCHAR NULL         -- enum: "通過" | "退件" | "不適用"
+note         TEXT NULL
+created_by   VARCHAR              -- expert name from session
+created_at   TIMESTAMP
+updated_at   TIMESTAMP
+```
+
+> Note: `rag_systems` / `rag_entries` are extension tables added after the v1.2 spec to back the AI 圖書館 RAG knowledge base. Unlike the core tables, these ARE managed by the application (created via `CREATE TABLE IF NOT EXISTS` on boot). RBAC: systems are admin-only CRUD; entries are read-only for viewers, writable by expert/admin.
+
 ## Status Lifecycle
 
 ```
