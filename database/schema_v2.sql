@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS budget.users (
     ad_account  VARCHAR(100) NOT NULL UNIQUE,
     password    VARCHAR(255) NOT NULL DEFAULT '',        -- werkzeug pbkdf2 雜湊；銜接 AD 後可留空
     role        VARCHAR(20)  NOT NULL DEFAULT 'viewer'
-                    CHECK (role IN ('admin', 'expert', 'viewer')),
+                    CHECK (role IN ('admin', 'boss', 'expert', 'viewer')),
     email       VARCHAR(200),
     created_at  TIMESTAMP    NOT NULL DEFAULT NOW()
 );
@@ -39,7 +39,7 @@ COMMENT ON COLUMN budget.users.name       IS '顯示名稱（中文姓名）';
 COMMENT ON COLUMN budget.users.department IS '所屬部門';
 COMMENT ON COLUMN budget.users.ad_account IS '登入帳號（Windows AD 帳號，唯一）；支援中英文、數字及特殊符號（@、*、& 等）';
 COMMENT ON COLUMN budget.users.password   IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
-COMMENT ON COLUMN budget.users.role       IS 'admin=系統管理員 | expert=專家複審 | viewer=唯讀';
+COMMENT ON COLUMN budget.users.role       IS 'admin=系統管理員 | boss=主管簽核 | expert=專家複審 | viewer=唯讀';
 COMMENT ON COLUMN budget.users.email      IS '電子郵件（選填）';
 
 
@@ -176,16 +176,51 @@ CREATE INDEX IF NOT EXISTS idx_notif_user_unread
 
 
 -- ══════════════════════════════════════════════════════════════════════════
+-- TABLE 5 : budget.rag_systems  /  TABLE 6 : budget.rag_entries
+-- AI 圖書館 RAG 知識庫（v1.2 之後的擴充表）。
+-- 應用層於啟動時以 CREATE TABLE IF NOT EXISTS 自動建立並 seed 16 個系統，
+-- 此處保留 DDL 供文件 / 全新建庫使用。
+-- ══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS budget.rag_systems (
+    id          SERIAL    PRIMARY KEY,
+    name        VARCHAR   NOT NULL,                -- 系統類別名稱（可改名）
+    description TEXT,
+    sort_order  INT       DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS budget.rag_entries (
+    id          SERIAL    PRIMARY KEY,
+    system_id   INT       NOT NULL REFERENCES budget.rag_systems(id) ON DELETE CASCADE,
+    title       VARCHAR   NOT NULL,
+    keywords    TEXT,                              -- 逗號分隔，供搜尋篩選
+    content     TEXT,                              -- 判斷規則 / 內容
+    example     TEXT,
+    disposition VARCHAR,                           -- 通過 | 退件 | 不適用
+    note        TEXT,
+    created_by  VARCHAR,
+    created_at  TIMESTAMP DEFAULT NOW(),
+    updated_at  TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_entries_system
+    ON budget.rag_entries (system_id);
+
+COMMENT ON TABLE budget.rag_systems IS 'AI 圖書館系統類別（卡片）';
+COMMENT ON TABLE budget.rag_entries IS 'AI 圖書館 RAG 知識 / 規則資料';
+
+
+-- ══════════════════════════════════════════════════════════════════════════
 -- 既有資料庫升級（已有 budget.users 但尚無 password 欄位時執行）
 -- 新建資料庫可略過此段
 -- ══════════════════════════════════════════════════════════════════════════
 ALTER TABLE budget.users
     ADD COLUMN IF NOT EXISTS password VARCHAR(255) NOT NULL DEFAULT '';
 
--- 移除 owner 角色（如果舊的 CHECK constraint 仍存在）
+-- 角色 CHECK constraint：新增 boss（主管簽核），移除舊的 owner
 ALTER TABLE budget.users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE budget.users ADD CONSTRAINT users_role_check
-    CHECK (role IN ('admin', 'expert', 'viewer'));
+    CHECK (role IN ('admin', 'boss', 'expert', 'viewer'));
 
 COMMENT ON COLUMN budget.users.password IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
 
