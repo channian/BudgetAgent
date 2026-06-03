@@ -7,6 +7,16 @@ DB = {
     "options": "-c search_path=budget",
 }
 
+# HR / AD employee database — used for expert name → email lookup
+HR_DB = {
+    "dbname":  "CIM",
+    "user":    "postgres",
+    "password": "1qaz2wsx",
+    "host":    "10.10.28.170",
+    "port":    "5432",
+    "options": "-c search_path=base",
+}
+
 SECRET_KEY = "pensieve-internal-2026"
 
 # ── Active Directory (LDAP) ───────────────────────────────────────────
@@ -22,9 +32,9 @@ LDAP_BIND_PASS = os.getenv("LDAP_BIND_PASS", "")        # service account passwo
 # ── SMTP (internal mail relay) ────────────────────────────────────────
 # Point at your internal Exchange / SMTP relay.
 # Leave SMTP_SERVER blank to disable email sending entirely.
-SMTP_SERVER      = os.getenv("SMTP_SERVER",      "")    # e.g. "10.10.51.20"
+SMTP_SERVER      = os.getenv("SMTP_SERVER",      "10.12.10.31")
 SMTP_PORT        = int(os.getenv("SMTP_PORT",    "25"))
-SMTP_SENDER      = os.getenv("SMTP_SENDER",      "Budget_AIAgent@aseglobal.com")
+SMTP_SENDER      = os.getenv("SMTP_SENDER",      "Budget_Agent@aseglobal.com")
 SMTP_SENDER_NAME = os.getenv("SMTP_SENDER_NAME", "預算AI審核平台")
 # Safety checkpoint: every dispatch email is always CC'd to this address.
 SMTP_ALWAYS_CC   = os.getenv("SMTP_ALWAYS_CC",   "Jarven_Chong@aseglobal.com")
