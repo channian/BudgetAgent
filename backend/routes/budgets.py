@@ -234,11 +234,11 @@ def dispatch_budget(budget_id):
         except Exception:
             pass
 
-        # 2. AD email lookup + actual email dispatch
+        # 2. Email lookup (mapping file → AD fallback) + actual email dispatch
         try:
-            from utils.ldap_lookup import lookup_email_by_name
+            from utils.expert_directory import resolve_email
             from utils.email_service import send_dispatch_email
-            expert_email = lookup_email_by_name(expert_name)
+            expert_email = resolve_email(expert_name)
             if expert_email:
                 ok = send_dispatch_email(
                     to_email=expert_email,
