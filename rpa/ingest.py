@@ -184,9 +184,8 @@ def batch_process():
     cur.close()
     conn.close()
 
-    # ── 備份原始檔案 ─────────────────────────────────────────────────
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"budget_{stamp}.json")
+    # ── 備份原始檔案（固定覆蓋，不加時間戳）────────────────────────
+    backup_path = os.path.join(BACKUP_DIR, "budget.json")
     shutil.move(INPUT_FILE, backup_path)
     print(f"\n完成：{ok} 成功 / {fail} 失敗")
     print(f"📦 原始檔案已備份至 {backup_path}")
