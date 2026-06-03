@@ -5,7 +5,7 @@
 > hard rules) — this file is the living "what's done / what's next" log.
 >
 > **Active branch:** `claude/elegant-dijkstra-fxlPR` — develop, commit, and push here.
-> **Last updated:** 2026-06-03
+> **Last updated:** 2026-06-03 (session 2)
 
 ---
 
@@ -112,12 +112,16 @@ ad/                       reference samples (LDAP/email) — NOT wired into the 
 - **AD login (Fix E):** login tries AD bind first (syncs name/dept/email, auto-provisions
   new users as `viewer`), falls back to local DB password if AD unconfigured/unreachable.
 
-### Smart ingest / 補送 (NEW) ✅ *(see §6 caveat)*
-- `create_budget` endpoint now fingerprints case content:
+### Smart ingest / 補送 ✅
+- `create_budget` endpoint fingerprints case content:
   - identical data re-sent → **ignored** (no DB write, no spam)
   - case still under review, data changed → **updated** in place
   - case already 已審理 (退件/補件/通過), data changed → **new `X（補送）` case**
   - import path won't overwrite already-reviewed cases.
+- `rpa/ingest.py` now uses the same fingerprint + 補送 logic (P0-1 resolved):
+  - DB host updated to `10.10.28.170`
+  - uses `_rpa_signature` / `_row_signature` (RPA-controlled fields only)
+  - same three-way decision: ignore / update-in-place / 補送 new case
 
 ### Expert write lock (Fix F) ✅
 - If `expert_name` is set, only that exact expert (or admin) can POST `/review`.
@@ -131,11 +135,9 @@ ad/                       reference samples (LDAP/email) — NOT wired into the 
 ## 4. What to do NEXT (prioritized)
 
 ### 🔴 P0 — correctness, do first
-1. **Reconcile `rpa/ingest.py` with the smart-ingest logic (§6).** The real RPA path
-   bypasses all the 補送/re-scan handling and still uses host `10.10.51.98`.
-   Decide: either (a) make `ingest.py` POST to the Flask `/api/budgets` endpoint, or
-   (b) port the `_case_signature` / 補送 logic into `ingest.py`. Update its DB host to
-   `10.10.28.170`. **Until this is done, the 補送 feature does NOT apply to real RPA drops.**
+1. ~~Reconcile `rpa/ingest.py`~~ ✅ **DONE** — host updated, fingerprint + 補送 logic ported.
+   **⚠️ Confirm the Windows folder paths in `rpa/ingest.py` are still correct** on the RPA
+   machine before running (`INPUT_DIR` / `BACKUP_DIR` were not changed).
 2. **Fill in production config** (`backend/config.py`, §5): LDAP_* and SMTP_* are blank,
    so AD login + dispatch email are currently **disabled** (graceful no-op).
 3. **Populate `backend/data/expert_emails.csv`** (or drop an `.xlsx`) with real
@@ -181,11 +183,9 @@ Edit `backend/config.py` (or set as env vars — all use `os.getenv`):
 
 ## 6. ⚠️ KNOWN GOTCHAS / TRAPS
 
-1. **`rpa/ingest.py` is the real ingest, and it bypasses `create_budget`.**
-   The smart re-scan/補送 logic lives in the Flask endpoint, but RPA inserts
-   directly via its own `INSERT ... ON CONFLICT (project_name) DO UPDATE`. It also
-   still has the **old DB host `10.10.51.98`** and old Windows folder paths. This is
-   the #1 thing to reconcile (P0-1).
+1. **`rpa/ingest.py` paths are unverified.** The host and smart-ingest logic have been
+   updated, but `INPUT_DIR` / `BACKUP_DIR` (Windows paths) were not changed — confirm
+   they are still correct on the RPA machine before running.
 2. **No build step.** Editing `.jsx` = just save; reload browser. There is no
    transpile/lint pipeline. Babel compiles in-browser. Keep JSX ES5/ES2015-safe.
 3. **`config.py` contains plaintext DB password.** It's committed. Treat the repo as
