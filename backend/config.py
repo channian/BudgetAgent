@@ -7,6 +7,16 @@ DB = {
     "options": "-c search_path=budget",
 }
 
+# HR / AD employee database — used for expert name → email lookup
+HR_DB = {
+    "dbname":  "CIM",
+    "user":    "postgres",
+    "password": "1qaz2wsx",
+    "host":    "10.10.28.170",
+    "port":    "5432",
+    "options": "-c search_path=base",
+}
+
 SECRET_KEY = "pensieve-internal-2026"
 
 # ── Active Directory (LDAP) ───────────────────────────────────────────
