@@ -214,12 +214,15 @@ def dispatch_budget(budget_id):
     _notify_roles(["admin"],
         f"📤 {user.get('name','系統')} 派發案件「{before['project_name']}」(#{budget_id})，"
         f"指派專家：{assigned}。")
-    # Notify the individual expert by name
+
+    email_status = None
     if after.get("expert_name"):
+        expert_name = after["expert_name"]
+
+        # 1. In-app notification (existing logic)
         try:
             with db_cursor() as cur:
-                cur.execute("SELECT id FROM budget.users WHERE name = %s",
-                            (after["expert_name"],))
+                cur.execute("SELECT id FROM budget.users WHERE name = %s", (expert_name,))
                 eu = cur.fetchone()
             if eu:
                 with db_cursor(commit=True) as cur:
@@ -230,7 +233,31 @@ def dispatch_budget(budget_id):
                     )
         except Exception:
             pass
-    return jsonify(budget=after)
+
+        # 2. AD email lookup + actual email dispatch
+        try:
+            from utils.ldap_lookup import lookup_email_by_name
+            from utils.email_service import send_dispatch_email
+            expert_email = lookup_email_by_name(expert_name)
+            if expert_email:
+                ok = send_dispatch_email(
+                    to_email=expert_email,
+                    expert_name=expert_name,
+                    project_name=before["project_name"],
+                    budget_id=budget_id,
+                    budget_no=after.get("budget_no"),
+                    amount=after.get("amount"),
+                    dispatch_date=after.get("dispatch_date"),
+                )
+                email_status = "sent" if ok else "failed"
+            else:
+                email_status = "no_email"
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Email dispatch error: %s", e)
+            email_status = "error"
+
+    return jsonify(budget=after, email_status=email_status)
 
 
 # ── Delete a case (admin only) ───────────────────────────────────────
