@@ -1,4 +1,4 @@
-import io, csv, datetime
+import io, csv, json, hashlib, datetime
 from flask import Blueprint, request, jsonify, send_file
 from psycopg2.extras import Json as PgJson
 from db import cursor as db_cursor, row_to_dict
@@ -9,6 +9,51 @@ budgets_bp = Blueprint("budgets", __name__)
 
 PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"]
 COMPLETED_STATUSES = ["CLOSED", "REJECTED"]
+
+# A case is "已審理" once the expert has acted on it (退件 / 補件 / 通過).
+# Re-ingesting changed data for such a case must NOT overwrite history —
+# it becomes a new 補送 case instead.
+DECIDED_STATUSES = ("CLOSED", "REJECTED", "PENDING_ACTION")
+
+
+def _case_signature(d):
+    """Stable fingerprint of a case's meaningful content (ignores status /
+    timestamps / expert decision). Used to detect 'same data re-scanned'."""
+    amount = d.get("amount")
+    try:
+        amount = float(amount) if amount not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        amount = 0.0
+    ai = d.get("ai_result")
+    if isinstance(ai, dict):
+        ai_str = json.dumps(ai, sort_keys=True, ensure_ascii=False)
+    else:
+        ai_str = str(ai) if ai else ""
+    parts = [
+        (d.get("category")     or "").strip(),
+        (d.get("sub_category") or "").strip(),
+        (d.get("expert_name")  or "").strip(),
+        (d.get("owner")        or "").strip(),
+        f"{amount:.4f}",
+        (d.get("ai_comment")   or "").strip(),
+        ai_str,
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+
+
+def _next_supplement_name(cur, base):
+    """Return the next free 補送 project name: X（補送）, X（補送2）, …"""
+    candidate, n = f"{base}（補送）", 1
+    while True:
+        cur.execute(
+            "SELECT 1 FROM budget.budget_requests WHERE project_name = %s",
+            (candidate,),
+        )
+        if not cur.fetchone():
+            return candidate
+        n += 1
+        candidate = f"{base}（補送{n}）"
+
 
 
 def _notify_roles(roles, message):
@@ -53,7 +98,7 @@ def list_budgets():
     try:
         with db_cursor() as cur:
             cur.execute(
-                f"SELECT * FROM budget.budget_requests WHERE {where} ORDER BY created_at DESC",
+                f"SELECT * FROM budget.budget_requests WHERE {where} ORDER BY id DESC",
                 params,
             )
             rows = [row_to_dict(r) for r in cur.fetchall()]
@@ -63,56 +108,112 @@ def list_budgets():
     return jsonify(budgets=rows)
 
 
-# ── Create ────────────────────────────────────────────────────────────
+# ── Create / ingest ───────────────────────────────────────────────────
+# Smart ingest used by both the manual "建立預算單" form and the RPA JSON drop.
+# Behaviour when the same project_name already exists:
+#   • data identical to any existing version → IGNORE   (kills re-scan spam)
+#   • case still under review, data changed   → UPDATE   (pre-review fix)
+#   • case already 已審理, data changed        → 補送 new case (keep history)
 @budgets_bp.post("/budgets")
 @require_auth
 def create_budget():
     data = request.json or {}
     user = current_user()
 
-    _, iso_week, _ = datetime.datetime.now().isocalendar()
+    project = (data.get("project_name") or "").strip()
+    if not project:
+        return jsonify(error="缺少項目名稱（project_name）"), 400
 
+    _, iso_week, _ = datetime.datetime.now().isocalendar()
     ai_obj = data.get("ai_result_obj")
     owner  = (data.get("owner") or user.get("name") or "").strip() or None
     status = "EXPERT_REVIEW" if ai_obj else "AI_REVIEW"
 
+    incoming = {
+        "category":     data.get("category"),
+        "sub_category": data.get("sub_category"),
+        "expert_name":  data.get("expert_name"),
+        "owner":        owner,
+        "amount":       data.get("amount", 0),
+        "ai_comment":   data.get("ai_comment"),
+        "ai_result":    ai_obj,
+    }
+    incoming_sig = _case_signature(incoming)
+
     try:
+        # Gather the base case + all of its existing 補送 versions.
+        with db_cursor() as cur:
+            cur.execute(
+                "SELECT * FROM budget.budget_requests "
+                "WHERE project_name = %s OR project_name LIKE %s "
+                "ORDER BY id DESC",
+                (project, project.replace("%", r"\%").replace("_", r"\_") + "（補送%"),
+            )
+            existing = [row_to_dict(r) for r in cur.fetchall()]
+
+        # 1) Identical data already present → ignore (re-scan no-op).
+        for ex in existing:
+            if _case_signature(ex) == incoming_sig:
+                return jsonify(id=ex["id"], status=ex["status"], action="ignored",
+                               project_name=ex["project_name"],
+                               message="資料未變更，已存在相同案件，已略過。"), 200
+
+        latest = existing[0] if existing else None
+
+        # 2) Case still under review, data changed → update in place.
+        if latest and latest["status"] not in DECIDED_STATUSES:
+            with db_cursor(commit=True) as cur:
+                cur.execute(
+                    """UPDATE budget.budget_requests SET
+                           category=%s, sub_category=%s, expert_name=%s,
+                           owner=%s, amount=%s, ai_comment=%s, ai_result=%s,
+                           status=%s, updated_at=NOW()
+                       WHERE id=%s RETURNING *""",
+                    (data.get("category"), data.get("sub_category"),
+                     data.get("expert_name"), owner, data.get("amount", 0),
+                     data.get("ai_comment"),
+                     PgJson(ai_obj) if ai_obj else None, status, latest["id"]),
+                )
+                after = row_to_dict(cur.fetchone())
+            audit_log(latest["id"], "UPDATE", user.get("name", "system"), latest, after)
+            return jsonify(id=latest["id"], status=after["status"], action="updated",
+                           project_name=after["project_name"],
+                           message="案件尚未審理，已更新為最新資料。"), 200
+
+        # 3) Decide the name: brand-new vs 補送 of an already-decided case.
+        if latest and latest["status"] in DECIDED_STATUSES:
+            with db_cursor() as cur:
+                insert_name = _next_supplement_name(cur, project)
+            note   = f"補送：原案件「{project}」(#{latest['id']}) 經審理後重新送件。"
+            action = "supplemented"
+        else:
+            insert_name, note, action = project, None, "inserted"
+
         with db_cursor(commit=True) as cur:
             cur.execute(
                 """INSERT INTO budget.budget_requests
                        (project_name, week, category, sub_category, expert_name,
-                        owner, amount, ai_comment, ai_result, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (project_name) DO UPDATE SET
-                       category      = EXCLUDED.category,
-                       owner         = EXCLUDED.owner,
-                       amount        = EXCLUDED.amount,
-                       sub_category  = COALESCE(EXCLUDED.sub_category,  budget_requests.sub_category),
-                       expert_name   = COALESCE(EXCLUDED.expert_name,   budget_requests.expert_name),
-                       ai_comment    = COALESCE(EXCLUDED.ai_comment,    budget_requests.ai_comment),
-                       ai_result     = COALESCE(EXCLUDED.ai_result,     budget_requests.ai_result)
+                        owner, amount, ai_comment, ai_result, status, note)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    RETURNING id""",
-                (
-                    data.get("project_name"),
-                    iso_week,
-                    data.get("category"),
-                    data.get("sub_category"),
-                    data.get("expert_name"),
-                    owner,
-                    data.get("amount", 0),
-                    data.get("ai_comment"),
-                    PgJson(ai_obj) if ai_obj else None,
-                    status,
-                ),
+                (insert_name, iso_week, data.get("category"),
+                 data.get("sub_category"), data.get("expert_name"), owner,
+                 data.get("amount", 0), data.get("ai_comment"),
+                 PgJson(ai_obj) if ai_obj else None, status, note),
             )
             budget_id = cur.fetchone()["id"]
     except Exception as e:
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "CREATE", user.get("name", "system"), None, data)
-    _notify_roles(["admin"],
-        f"📝 {user.get('name','系統')} 建立了新案件「{data.get('project_name','')}」(#{budget_id})。")
-    return jsonify(id=budget_id, status=status), 201
+    if action == "supplemented":
+        _notify_roles(["admin"],
+            f"♻️ 收到補送案件「{insert_name}」(#{budget_id})，原案件「{project}」已審理過。")
+    else:
+        _notify_roles(["admin"],
+            f"📝 {user.get('name','系統')} 建立了新案件「{insert_name}」(#{budget_id})。")
+    return jsonify(id=budget_id, status=status, action=action,
+                   project_name=insert_name), 201
 
 
 # ── Get single ────────────────────────────────────────────────────────
@@ -488,7 +589,7 @@ def _fetch_for_export(scope):
     statuses = PENDING_STATUSES if scope == "pending" else COMPLETED_STATUSES
     with db_cursor() as cur:
         cur.execute(
-            "SELECT * FROM budget.budget_requests WHERE status = ANY(%s) ORDER BY created_at DESC",
+            "SELECT * FROM budget.budget_requests WHERE status = ANY(%s) ORDER BY id DESC",
             (statuses,),
         )
         return [row_to_dict(r) for r in cur.fetchall()]
@@ -635,6 +736,8 @@ def import_budgets():
                                owner     = EXCLUDED.owner,
                                amount    = EXCLUDED.amount,
                                budget_no = COALESCE(EXCLUDED.budget_no, budget_requests.budget_no)
+                           WHERE budget_requests.status NOT IN
+                                 ('CLOSED', 'REJECTED', 'PENDING_ACTION')
                            RETURNING id""",
                         (
                             project,
@@ -645,7 +748,12 @@ def import_budgets():
                             cell(row, "budget_no"),
                         ),
                     )
-                    inserted += 1
+                    # No row returned → an already-reviewed case was protected
+                    # from being overwritten by re-import; count it as skipped.
+                    if cur.fetchone():
+                        inserted += 1
+                    else:
+                        skipped += 1
                 except Exception as re:
                     errors.append(f"第 {n} 列：{re}")
     except Exception as e:
