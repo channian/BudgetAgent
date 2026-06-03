@@ -5,7 +5,7 @@
 -- Encoding : UTF-8
 --
 -- 執行方式 (psql):
---   psql -h 10.10.51.98 -U cim_admin -d CIM -f schema_v2.sql
+--   psql -h 10.10.28.170 -U cim_admin -d CIM -f schema_v2.sql
 --
 -- 注意：本腳本使用 IF NOT EXISTS / IF EXISTS，可安全重複執行。
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -223,6 +223,12 @@ ALTER TABLE budget.users ADD CONSTRAINT users_role_check
     CHECK (role IN ('admin', 'boss', 'expert', 'viewer'));
 
 COMMENT ON COLUMN budget.users.password IS 'werkzeug pbkdf2_sha256 雜湊密碼；銜接真實 AD 後此欄位可棄用';
+
+-- updated_at：記錄最後一次欄位變更時間（schema v2.0 之後補加）
+ALTER TABLE budget.budget_requests
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+COMMENT ON COLUMN budget.budget_requests.updated_at IS '最後欄位更新時間；UPDATE 時由應用層設為 NOW()';
 
 
 -- ══════════════════════════════════════════════════════════════════════════
