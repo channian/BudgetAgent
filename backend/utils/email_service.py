@@ -20,6 +20,10 @@ def send_dispatch_email(
     """Send a dispatch notification to the assigned expert. Returns True on success."""
     try:
         from config import SMTP_SERVER, SMTP_PORT, SMTP_SENDER, SMTP_SENDER_NAME
+        try:
+            from config import SMTP_ALWAYS_CC
+        except ImportError:
+            SMTP_ALWAYS_CC = ""
     except ImportError as e:
         logger.warning("Email config missing: %s", e)
         return False
@@ -142,12 +146,22 @@ def send_dispatch_email(
         msg["From"] = f"{SMTP_SENDER_NAME} <{SMTP_SENDER}>"
         msg["To"] = to_email
         msg["Subject"] = subject
+
+        # Safety checkpoint: always CC the supervisor, but never CC the same
+        # address that is already the primary recipient (avoid duplicate).
+        recipients = [to_email]
+        cc = (SMTP_ALWAYS_CC or "").strip()
+        if cc and cc.lower() != to_email.lower():
+            msg["Cc"] = cc
+            recipients.append(cc)
+
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
-            server.sendmail(SMTP_SENDER, [to_email], msg.as_string())
+            server.sendmail(SMTP_SENDER, recipients, msg.as_string())
 
-        logger.info("Dispatch email sent to %s for budget #%s", to_email, budget_id)
+        logger.info("Dispatch email sent to %s (cc=%s) for budget #%s",
+                    to_email, cc or "—", budget_id)
         return True
 
     except Exception as e:
