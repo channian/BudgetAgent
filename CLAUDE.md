@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **New here? Read `HANDOVER.md` first** — it tracks what's done, what's next,
+> current config/hosts, and known traps. This file (CLAUDE.md) holds the fixed
+> schema + rules; HANDOVER.md holds the living project state.
+
 ## Project Overview
 
 AI Agent 預算審核平台 (AI Agent Budget Review Platform) — an internal web system for ASE Smart System Department to manage and review AI Agent project budgets through a two-layer approval mechanism: AI auto-review (Layer 1) followed by expert manual review (Layer 2).
@@ -9,7 +13,7 @@ AI Agent 預算審核平台 (AI Agent Budget Review Platform) — an internal we
 ## Tech Context
 
 - Frontend design files will be added to the repo (pending upload). All UI follows a Pinterest-style warm aesthetic: warm cream base, coral/berry accent colors, rounded corners.
-- Backend connects to an existing PostgreSQL database (`CIM` dbname, `budget` schema) at `10.10.51.98:5432`.
+- Backend connects to an existing PostgreSQL database (`CIM` dbname, `budget` schema). **Current host: `10.10.28.170:5432`** (set in `backend/config.py`; note `rpa/ingest.py` still has the old `10.10.51.98` — see HANDOVER.md §6).
 - The DB schema is already provisioned per v1.2 spec — do not alter table definitions, only write application logic against the existing schema.
 - RPA deposits AI-generated JSON files into a watched input folder; a batch processor ingests them into the DB.
 
