@@ -1,18 +1,18 @@
 """
-RPA 批次進件腳本 — merged_output.json 格式
-讀取單一 JSON 陣列檔，將每筆案件寫入 budget.budget_requests。
+RPA 批次進件腳本 — budget.json 格式（含 AI 判決欄位）
+讀取單一 JSON 檔（物件或陣列皆可），將每筆案件寫入 budget.budget_requests。
 
 補送邏輯：
-  • 相同資料重複掃描         → 忽略
-  • 案件審核中，資料有變     → 原地更新
-  • 案件已審理，資料有變     → 建立補送案件「X（補送）」
+  • 相同 AI 資料重複掃描         → 忽略
+  • 案件審核中，AI 資料有變       → 原地更新
+  • 案件已審理，AI 資料有變       → 建立補送案件「X（補送）」
 """
 
 import os, json, hashlib, datetime, shutil
 import psycopg2, psycopg2.extras
 
 # ⚠️ 請確認這兩個路徑在 RPA 機器上正確
-INPUT_FILE = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\初步審核\merged_output.json"
+INPUT_FILE = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\新增資料夾\pensieve回傳資料\budget.json"
 BACKUP_DIR = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\A1 BACKUP"
 
 DB_CONFIG = {
@@ -27,24 +27,37 @@ DB_CONFIG = {
 DECIDED_STATUSES = ("CLOSED", "REJECTED", "PENDING_ACTION")
 
 
-def _rpa_signature(category, sub_category, expert_name, note):
+def _rpa_signature(category, sub_category, expert_name, ai_comment, ai_result_dict):
     """Stable fingerprint of RPA-controlled fields."""
+    ai_str = json.dumps(ai_result_dict, sort_keys=True, ensure_ascii=False) if ai_result_dict else ""
     parts = [
         (category     or "").strip(),
         (sub_category or "").strip(),
         (expert_name  or "").strip(),
-        (note         or "").strip(),
+        (ai_comment   or "").strip(),
+        ai_str,
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
 
 
 def _row_signature(row):
     """Compute RPA-field signature from a DB row dict."""
+    ai = row.get("ai_result")
+    if isinstance(ai, dict):
+        ai_str = json.dumps(ai, sort_keys=True, ensure_ascii=False)
+    elif isinstance(ai, str):
+        try:
+            ai_str = json.dumps(json.loads(ai), sort_keys=True, ensure_ascii=False)
+        except Exception:
+            ai_str = ai or ""
+    else:
+        ai_str = ""
     parts = [
         (row.get("category")     or "").strip(),
         (row.get("sub_category") or "").strip(),
         (row.get("expert_name")  or "").strip(),
-        (row.get("note")         or "").strip(),
+        (row.get("ai_comment")   or "").strip(),
+        ai_str,
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
 
@@ -69,10 +82,10 @@ def batch_process():
         return
 
     with open(INPUT_FILE, "r", encoding="utf-8") as f:
-        records = json.load(f)
+        raw = json.load(f)
 
-    if not isinstance(records, list):
-        records = [records]
+    # 支援單一物件或陣列
+    records = raw if isinstance(raw, list) else [raw]
 
     if not records:
         print("ℹ️  JSON 檔案是空的，腳本結束。")
@@ -87,7 +100,7 @@ def batch_process():
     ok, fail = 0, 0
 
     for data in records:
-        project      = (data.get("案件名稱") or "").strip()
+        project = (data.get("案件名稱") or "").strip()
         if not project:
             print("⚠️  缺少案件名稱，略過此筆")
             continue
@@ -95,8 +108,14 @@ def batch_process():
         category     = data.get("判定類別")
         sub_category = data.get("判定系統")
         expert_name  = data.get("負責專家")
-        note         = data.get("檔案實體清單")   # 檔案清單存入 note
-        incoming_sig = _rpa_signature(category, sub_category, expert_name, note)
+        ai_comment   = data.get("原因", "")
+        ai_result_dict = {
+            "AI處置結果":        data.get("最終決策"),
+            "保留案件的信心分數": data.get("AI對於保留案件的信心分數"),
+        }
+        ai_result_pg  = psycopg2.extras.Json(ai_result_dict)
+        incoming_sig  = _rpa_signature(category, sub_category, expert_name,
+                                       ai_comment, ai_result_dict)
 
         try:
             # ── Fetch existing case + all 補送 versions ──────────────
@@ -109,7 +128,7 @@ def batch_process():
             )
             existing = [dict(r) for r in cur.fetchall()]
 
-            # ── 1) Identical data → ignore ────────────────────────────
+            # ── 1) Identical AI data → ignore ─────────────────────────
             if any(_row_signature(ex) == incoming_sig for ex in existing):
                 print(f"⏭  資料未變，略過 {project}")
                 ok += 1
@@ -122,9 +141,10 @@ def batch_process():
                 cur.execute(
                     """UPDATE budget.budget_requests SET
                            category=%s, sub_category=%s, expert_name=%s,
-                           note=%s, updated_at=NOW()
+                           ai_comment=%s, ai_result=%s, updated_at=NOW()
                        WHERE id=%s RETURNING id""",
-                    (category, sub_category, expert_name, note, latest["id"]),
+                    (category, sub_category, expert_name,
+                     ai_comment, ai_result_pg, latest["id"]),
                 )
                 conn.commit()
                 budget_id = cur.fetchone()["id"]
@@ -135,23 +155,21 @@ def batch_process():
             # ── 3) Already decided → create 補送 case ────────────────
             if latest and latest["status"] in DECIDED_STATUSES:
                 insert_name = _next_supplement_name(cur, project)
-                insert_note = f"補送：原案件「{project}」(#{latest['id']}) 經審理後重新送件。"
-                if note:
-                    insert_note += f"\n{note}"
+                note = f"補送：原案件「{project}」(#{latest['id']}) 經審理後重新送件。"
                 action = "補送"
             else:
                 insert_name = project
-                insert_note = note
+                note = None
                 action = "新增"
 
             cur.execute(
                 """INSERT INTO budget.budget_requests
                        (project_name, week, category, sub_category, expert_name,
-                        note, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'AI_REVIEW')
+                        ai_comment, ai_result, status, note)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, 'AI_REVIEW', %s)
                    RETURNING id""",
-                (insert_name, iso_week, category, sub_category,
-                 expert_name, insert_note),
+                (insert_name, iso_week, category, sub_category, expert_name,
+                 ai_comment, ai_result_pg, note),
             )
             conn.commit()
             budget_id = cur.fetchone()["id"]
@@ -168,7 +186,7 @@ def batch_process():
 
     # ── 備份原始檔案 ─────────────────────────────────────────────────
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"merged_output_{stamp}.json")
+    backup_path = os.path.join(BACKUP_DIR, f"budget_{stamp}.json")
     shutil.move(INPUT_FILE, backup_path)
     print(f"\n完成：{ok} 成功 / {fail} 失敗")
     print(f"📦 原始檔案已備份至 {backup_path}")
