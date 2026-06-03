@@ -389,8 +389,16 @@ function AssignmentPage() {
     setDispatching(d => ({ ...d, [b.dbId]: true }));
     setErrMsg(e => { const n = { ...e }; delete n[b.dbId]; return n; });
     try {
-      const updated = await API.dispatch(b.dbId, forms[b.dbId] || {});
+      const { budget: updated, emailStatus } = await API.dispatch(b.dbId, forms[b.dbId] || {});
       setDoneInfo(d => ({ ...d, [b.dbId]: updated }));
+      // Email status toast
+      const expert = updated.expertName || b.expertName || "—";
+      if (emailStatus === "sent")
+        Toast.show(`✅ 已寄出通知 Email 給 ${expert}`, "ok");
+      else if (emailStatus === "no_email")
+        Toast.show(`⚠ 找不到 ${expert} 的信箱，Email 未寄出`, "warn");
+      else if (emailStatus === "failed" || emailStatus === "error")
+        Toast.show(`❌ Email 寄送失敗（${expert}），請確認 SMTP 設定`, "err");
       setTimeout(() => {
         setAiCases(cs => cs.filter(c => c.dbId !== b.dbId));
         setDispatched(ds => [updated, ...ds]);

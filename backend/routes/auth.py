@@ -34,6 +34,14 @@ def login():
     if not ad_account or not password:
         return jsonify(error="請輸入帳號與密碼"), 400
 
+    # ── Step 1: try Windows AD authentication ────────────────────────
+    try:
+        from utils.ldap_auth import ad_authenticate
+        ad_info = ad_authenticate(ad_account, password)
+    except Exception:
+        ad_info = None
+
+    # ── Step 2: look up (or auto-sync) the user in the local DB ──────
     try:
         with db_cursor() as cur:
             cur.execute(
@@ -44,6 +52,48 @@ def login():
     except Exception as e:
         return jsonify(error=f"資料庫連線失敗：{e}"), 500
 
+    if ad_info:
+        # AD auth succeeded → sync name/department/email from AD into the DB
+        if row:
+            user = row_to_dict(row)
+            try:
+                with db_cursor(commit=True) as cur:
+                    cur.execute(
+                        """UPDATE budget.users
+                           SET name       = COALESCE(%s, name),
+                               department = COALESCE(%s, department),
+                               email      = COALESCE(%s, email)
+                           WHERE ad_account = %s""",
+                        (ad_info.get("name"), ad_info.get("department"),
+                         ad_info.get("email"), ad_account),
+                    )
+                # Refresh after sync
+                with db_cursor() as cur:
+                    cur.execute("SELECT * FROM budget.users WHERE ad_account = %s", (ad_account,))
+                    user = row_to_dict(cur.fetchone())
+            except Exception:
+                pass  # sync failure is non-fatal; proceed with cached record
+        else:
+            # AD user exists but has no local record → auto-provision as viewer
+            try:
+                with db_cursor(commit=True) as cur:
+                    cur.execute(
+                        """INSERT INTO budget.users (name, department, ad_account, role, email)
+                           VALUES (%s, %s, %s, 'viewer', %s)
+                           RETURNING *""",
+                        (ad_info.get("name") or ad_account,
+                         ad_info.get("department"),
+                         ad_account,
+                         ad_info.get("email")),
+                    )
+                    user = row_to_dict(cur.fetchone())
+            except Exception as e:
+                return jsonify(error=f"帳號自動建立失敗：{e}"), 500
+
+        session["user"] = user
+        return jsonify(user=_safe(user), auth_method="ad")
+
+    # ── Step 3: AD not configured / unreachable → fall back to local DB password ──
     if not row:
         return jsonify(error="帳號不存在，請聯繫系統管理員"), 401
 
@@ -57,7 +107,7 @@ def login():
         return jsonify(error="密碼錯誤"), 401
 
     session["user"] = user
-    return jsonify(user=_safe(user))
+    return jsonify(user=_safe(user), auth_method="local")
 
 
 @auth_bp.post("/logout")

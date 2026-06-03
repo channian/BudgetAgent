@@ -392,4 +392,30 @@ function CategoryChip({ id, name }) {
 
 }
 
-Object.assign(window, { Icon, StatusBadge, ResultBadge, Conf, CycleTag, OwnerCell, CategoryChip, fmtAmount, Sidebar, Topbar });
+// ── Toast notification ───────────────────────────────────────────────
+// Usage: Toast.show("message", "ok" | "warn" | "err", durationMs?)
+const Toast = (() => {
+  let _container = null;
+  function _ensureContainer() {
+    if (_container) return _container;
+    _container = document.createElement("div");
+    _container.id = "toast-root";
+    document.body.appendChild(_container);
+    return _container;
+  }
+  function show(msg, kind = "ok", duration = 4000) {
+    const el = document.createElement("div");
+    el.className = `toast toast-${kind}`;
+    el.textContent = msg;
+    _ensureContainer().appendChild(el);
+    // trigger CSS transition
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("toast-in")));
+    setTimeout(() => {
+      el.classList.remove("toast-in");
+      el.addEventListener("transitionend", () => el.remove(), { once: true });
+    }, duration);
+  }
+  return { show };
+})();
+
+Object.assign(window, { Icon, StatusBadge, ResultBadge, Conf, CycleTag, OwnerCell, CategoryChip, fmtAmount, Sidebar, Topbar, Toast });

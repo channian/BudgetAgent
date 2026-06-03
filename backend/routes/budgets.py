@@ -418,6 +418,16 @@ def review_budget(budget_id):
             return jsonify(error="案件不存在"), 404
         before = row_to_dict(before_row)
 
+    # ── Expert write lock ─────────────────────────────────────────────
+    # If a specific expert is assigned, only that expert (or admin) may write.
+        assigned = (before.get("expert_name") or "").strip()
+        caller   = (user.get("name") or "").strip()
+        role     = user.get("role", "viewer")
+        if assigned and role not in ("admin",) and caller != assigned:
+            return jsonify(
+                error=f"此案件已指派給「{assigned}」，僅該專家或系統管理員可填寫評論。"
+            ), 403
+
         with db_cursor(commit=True) as cur:
             cur.execute(
                 """UPDATE budget.budget_requests

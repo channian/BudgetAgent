@@ -1571,3 +1571,22 @@ table.dt tbody tr.row-selected {
 .more-item.danger { color: var(--bad); }
 .more-item.danger:hover { background: var(--bad-soft); }
 .more-item:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Toast notifications ──────────────────────────────────────────── */
+#toast-root {
+  position: fixed; bottom: 28px; right: 28px; z-index: 9999;
+  display: flex; flex-direction: column; gap: 10px;
+  pointer-events: none;
+}
+.toast {
+  padding: 11px 18px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; max-width: 340px;
+  box-shadow: 0 6px 20px -6px oklch(0.3 0.05 30 / 0.25);
+  border: 1px solid transparent;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity 0.22s, transform 0.22s;
+}
+.toast.toast-in { opacity: 1; transform: translateY(0); }
+.toast-ok   { background: oklch(0.96 0.06 155); border-color: oklch(0.8 0.12 155); color: oklch(0.3 0.1 155); }
+.toast-warn { background: var(--warn-soft); border-color: oklch(0.75 0.14 75); color: oklch(0.45 0.14 75); }
+.toast-err  { background: var(--bad-soft);  border-color: oklch(0.75 0.18 22); color: oklch(0.4 0.18 22); }

@@ -248,7 +248,7 @@ async function apiDispatchBudget(dbId, form) {
       expert_name: form.expert_name || null,
     }),
   });
-  return dbToFrontend(d.budget);
+  return { budget: dbToFrontend(d.budget), emailStatus: d.email_status };
 }
 async function apiFetchTimeline(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/timeline`);

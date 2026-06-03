@@ -23,7 +23,12 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
   const isAdmin  = role === "admin";
   const isFinal  = budget.status === "CLOSED" || budget.status === "REJECTED";
   const isOpen   = budget.status === "EXPERT_REVIEW" || budget.status === "PENDING_ACTION";
-  const canReview = isOpen && !isViewer;                    // 專家可寫評論 + 建議
+  // Expert lock: if a specific expert is assigned, only that expert (or admin) may write.
+  const assignedExpert = (budget.expertName || "").trim();
+  const callerName     = (currentUser?.name || "").trim();
+  const isLockedOut    = isOpen && !isViewer && !isAdmin &&
+                         assignedExpert && callerName !== assignedExpert;
+  const canReview = isOpen && !isViewer && !isLockedOut;
   const canSign   = isOpen && (role === "admin" || role === "boss"); // boss/admin 可簽核
 
   const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
@@ -166,6 +171,11 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
               {isFinal && <ResultBadge result={budget.expertResult} />}
             </div>
             <div className="card-body">
+              {isLockedOut && (
+                <div style={{ marginBottom: 14, padding: "10px 14px", background: "var(--warn-soft)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "oklch(0.5 0.16 75)" }}>
+                  🔒 此案件已指派給「{assignedExpert}」，僅該專家或系統管理員可填寫評論。
+                </div>
+              )}
               <div className="field" style={{ marginBottom: 14 }}>
                 <label>專家複審評論 {canReview && <span className="opt">(將寫入稽核紀錄)</span>}</label>
                 <textarea

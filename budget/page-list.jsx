@@ -297,11 +297,22 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     }
     if (!confirm(`將派發 ${withExpert.length} 件案件給各自的負責專家${without ? `（${without} 件未指定專家，將略過）` : ""}。確定？`)) return;
     setDispatchBusy(true);
+    let sent = 0, noEmail = 0, failed = 0;
     for (const b of withExpert) {
-      try { await API.dispatch(b.dbId, { expert_name: b.expertName }); } catch {}
+      try {
+        const { emailStatus } = await API.dispatch(b.dbId, { expert_name: b.expertName });
+        if (emailStatus === "sent") sent++;
+        else if (emailStatus === "no_email") noEmail++;
+        else if (emailStatus === "failed" || emailStatus === "error") failed++;
+      } catch {}
     }
     setDispatchBusy(false);
     onRefresh && onRefresh();
+    const parts = [];
+    if (sent)    parts.push(`✅ ${sent} 件 Email 已寄出`);
+    if (noEmail) parts.push(`⚠ ${noEmail} 件找不到信箱`);
+    if (failed)  parts.push(`❌ ${failed} 件寄送失敗`);
+    if (parts.length) Toast.show(parts.join("　"), sent && !failed ? "ok" : "warn", 6000);
   };
 
   // KPIs (over all pending display rows)
