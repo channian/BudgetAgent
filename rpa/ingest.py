@@ -90,7 +90,6 @@ def batch_process():
         return
 
     print(f"📂 讀取到 {len(records)} 筆案件，開始匯入…")
-    os.makedirs(BACKUP_DIR, exist_ok=True)
 
     conn = psycopg2.connect(**DB_CONFIG)
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)

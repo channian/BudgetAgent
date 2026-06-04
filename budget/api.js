@@ -52,7 +52,15 @@ function copyToClipboard(text) {
 window.copyToClipboard = copyToClipboard;
 
 // ── Category name ↔ frontend colour ID ───────────────────────────────
+// Real business categories produced by pensieve/pipeline_1.py classify_category().
+// Each maps to one of 5 chip colour slots (RD/MKT/OPS/HR/IT) defined in styles.css.
 const CAT_NAME_TO_ID = {
+  "設備擴充 (UTI)": "OPS",   // amber
+  "工程擴廠 (新工)": "RD",    // purple
+  "CIM相關":        "IT",    // blue
+  "法遵 (ESH)":     "MKT",   // red
+  "未知":           "HR",    // teal
+  // legacy demo categories (kept for backward compatibility)
   "研發費用": "RD",
   "行銷推廣": "MKT",
   "營運支援": "OPS",

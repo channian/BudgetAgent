@@ -386,6 +386,16 @@ function AssignmentPage() {
     setForms(f => ({ ...f, [dbId]: { ...(f[dbId] || {}), [field]: val } }));
 
   const doDispatch = async (b) => {
+    const f = forms[b.dbId] || {};
+    const expert = (f.expert_name || "").trim();
+    if (!expert) {
+      setErrMsg(err => ({ ...err, [b.dbId]: "請先選擇負責專家" }));
+      return;
+    }
+    if (!confirm(
+      `確定派發案件「${b.project}」給「${expert}」？\n` +
+      `派發後將寄出通知 Email 給該專家，並進入專家審核流程。`
+    )) return;
     setDispatching(d => ({ ...d, [b.dbId]: true }));
     setErrMsg(e => { const n = { ...e }; delete n[b.dbId]; return n; });
     try {
