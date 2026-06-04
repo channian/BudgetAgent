@@ -316,7 +316,8 @@ def dispatch_budget(budget_id):
                    SET budget_no    = COALESCE(%s, budget_no),
                        expert_name  = COALESCE(%s, expert_name),
                        dispatch_date = NOW(),
-                       status        = 'EXPERT_REVIEW'
+                       status        = 'EXPERT_REVIEW',
+                       updated_at    = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (budget_no, expert_name, budget_id),
@@ -524,7 +525,7 @@ def review_budget(budget_id):
             cur.execute(
                 """UPDATE budget.budget_requests
                    SET expert_comment = %s, expert_decision = %s,
-                       locked_by = NULL, locked_at = NULL
+                       locked_by = NULL, locked_at = NULL, updated_at = NOW()
                    WHERE id = %s RETURNING *""",
                 (comment, decision, budget_id),
             )
@@ -570,7 +571,10 @@ def approve_budget(budget_id):
                            THEN EXTRACT(DAY FROM (NOW() - dispatch_date))::INT
                            ELSE NULL
                        END,
-                       status          = 'CLOSED'
+                       status          = 'CLOSED',
+                       locked_by       = NULL,
+                       locked_at       = NULL,
+                       updated_at      = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (comment, budget_id),
@@ -612,7 +616,10 @@ def reject_budget(budget_id):
                    SET expert_decision = '退件',
                        expert_comment  = COALESCE(NULLIF(%s, ''), expert_comment),
                        sign_date       = CASE WHEN %s THEN NOW() ELSE sign_date END,
-                       status          = %s
+                       status          = %s,
+                       locked_by       = NULL,
+                       locked_at       = NULL,
+                       updated_at      = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (comment, final, new_status, budget_id),
@@ -630,6 +637,91 @@ def reject_budget(budget_id):
         _notify_roles(["admin", "viewer"],
             f"⚠ 案件「{before['project_name']}」(#{budget_id}) 退回補件，等待申請人補充資料。")
     return jsonify(budget=after)
+
+
+# ── Batch sign (atomic) ──────────────────────────────────────────────
+@budgets_bp.post("/budgets/batch-sign")
+@require_auth
+def batch_sign():
+    """Sign off multiple cases in ONE transaction (all-or-nothing).
+
+    Each case is approved if the expert recommended 通過, or finally
+    rejected if the expert recommended 退件. If any single case fails
+    validation, the whole batch rolls back and nothing is signed."""
+    user = current_user()
+    if user.get("role") not in ("admin", "boss"):
+        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+
+    ids = (request.json or {}).get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify(error="未提供要簽核的案件"), 400
+    ids = [int(i) for i in ids]
+
+    results = []   # (budget_id, before, after, action) — for audit/notify after commit
+    try:
+        # Single transaction: any raise inside → full rollback
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                "SELECT * FROM budget.budget_requests WHERE id = ANY(%s) FOR UPDATE",
+                (ids,),
+            )
+            rows = {r["id"]: row_to_dict(r) for r in cur.fetchall()}
+
+            missing = [i for i in ids if i not in rows]
+            if missing:
+                raise ValueError(f"案件不存在：{missing}")
+
+            bad = [i for i in ids if rows[i]["status"] != "EXPERT_REVIEW"]
+            if bad:
+                raise ValueError(f"案件狀態非專家審核中，無法簽核：{bad}")
+
+            for i in ids:
+                before = rows[i]
+                if before.get("expert_decision") == "退件":
+                    cur.execute(
+                        """UPDATE budget.budget_requests
+                           SET expert_decision = '退件', sign_date = NOW(),
+                               status = 'REJECTED',
+                               locked_by = NULL, locked_at = NULL, updated_at = NOW()
+                           WHERE id = %s RETURNING *""",
+                        (i,),
+                    )
+                    action = "REJECT_FINAL"
+                else:
+                    cur.execute(
+                        """UPDATE budget.budget_requests
+                           SET expert_decision = '通過', sign_date = NOW(),
+                               cycle_time = CASE
+                                   WHEN dispatch_date IS NOT NULL
+                                   THEN EXTRACT(DAY FROM (NOW() - dispatch_date))::INT
+                                   ELSE NULL END,
+                               status = 'CLOSED',
+                               locked_by = NULL, locked_at = NULL, updated_at = NOW()
+                           WHERE id = %s RETURNING *""",
+                        (i,),
+                    )
+                    action = "APPROVE"
+                results.append((i, before, row_to_dict(cur.fetchone()), action))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    # Post-commit side effects (non-fatal)
+    operator = user.get("name", "system")
+    for budget_id, before, after, action in results:
+        try:
+            audit_log(budget_id, action, operator, before, after)
+            if action == "APPROVE":
+                _notify_roles(["admin", "viewer"],
+                    f"✅ 案件「{before['project_name']}」(#{budget_id}) 已核准通過，由 {operator} 簽核。")
+            else:
+                _notify_roles(["admin", "viewer"],
+                    f"❌ 案件「{before['project_name']}」(#{budget_id}) 已退件，由 {operator} 審核。")
+        except Exception:
+            pass
+
+    return jsonify(ok=True, signed=len(results))
 
 
 # ── Resubmit ──────────────────────────────────────────────────────────
@@ -653,7 +745,8 @@ def resubmit_budget(budget_id):
                 """UPDATE budget.budget_requests
                    SET status          = 'EXPERT_REVIEW',
                        expert_decision = NULL,
-                       expert_comment  = NULL
+                       expert_comment  = NULL,
+                       updated_at      = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (budget_id,),

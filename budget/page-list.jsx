@@ -278,13 +278,21 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   };
 
   const batchSign = async () => {
-    if (!selected.size || !onSign) return;
-    setBatchBusy(true);
+    if (!selected.size) return;
     const toSign = needSign.filter((b) => selected.has(b.dbId));
-    for (const b of toSign) { try { await onSign(b); } catch {} }
-    setSelected(new Set());
-    setBatchBusy(false);
-    onRefresh && onRefresh();
+    if (!toSign.length) return;
+    if (!confirm(`確定一鍵簽核 ${toSign.length} 件案件？此操作為全有全無，任一筆失敗將全部取消。`)) return;
+    setBatchBusy(true);
+    try {
+      const res = await API.batchSign(toSign.map((b) => b.dbId));
+      Toast.show(`✅ 已簽核 ${res.signed} 件`, "ok");
+      setSelected(new Set());
+    } catch (e) {
+      Toast.show(`❌ 批次簽核失敗，已全部取消：${e.message}`, "err");
+    } finally {
+      setBatchBusy(false);
+      onRefresh && onRefresh();
+    }
   };
 
   // ── One-click dispatch (admin) ──

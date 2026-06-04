@@ -254,6 +254,12 @@ async function apiFetchTimeline(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/timeline`);
   return d.timeline || [];
 }
+async function apiBatchSign(dbIds) {
+  return apiFetch("/api/budgets/batch-sign", {
+    method: "POST",
+    body: JSON.stringify({ ids: dbIds }),
+  });
+}
 async function apiAcquireLock(dbId) {
   return apiFetch(`/api/budgets/${dbId}/lock`, { method: "POST" });
 }
@@ -383,6 +389,7 @@ window.API = {
   saveReview:          apiSaveReview,
   dispatch:            apiDispatchBudget,
   fetchTimeline:       apiFetchTimeline,
+  batchSign:           apiBatchSign,
   acquireLock:         apiAcquireLock,
   releaseLock:         apiReleaseLock,
   fetchUsers:          apiFetchUsers,
