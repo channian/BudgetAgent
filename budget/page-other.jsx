@@ -771,4 +771,151 @@ function PermissionsPage() {
   );
 }
 
-Object.assign(window, { LibraryPage, AssignmentPage, PermissionsPage });
+// ── Activity / Login stats page ──────────────────────────────────────
+function ActivityPage() {
+  const [data,    setData]    = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [err,     setErr]     = React.useState("");
+
+  const load = () => {
+    setLoading(true); setErr("");
+    API.fetchLoginStats()
+      .then(d => setData(d))
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
+  };
+  React.useEffect(load, []);
+
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    const d    = new Date(iso);
+    const diff = Math.floor((Date.now() - d) / 1000);
+    if (diff < 60)    return "剛剛";
+    if (diff < 3600)  return `${Math.floor(diff / 60)} 分鐘前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前`;
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
+    return d.toLocaleDateString("zh-TW");
+  };
+
+  const statusDot = (last_login) => {
+    if (!last_login) return { cls: "dot-red",   label: "從未登入" };
+    const days = (Date.now() - new Date(last_login)) / 86400000;
+    if (days <= 7)  return { cls: "dot-green",  label: "活躍" };
+    if (days <= 30) return { cls: "dot-amber",  label: "近 30 天" };
+    return            { cls: "dot-red",   label: "超過 30 天" };
+  };
+
+  const summary = data?.summary || {};
+  const users   = data?.users   || [];
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h2>使用狀況</h2>
+          <div className="lede">追蹤使用者登入紀錄，瞭解哪些人在使用平台、最後上線時間與登入頻率</div>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
+        </div>
+      </div>
+
+      {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
+
+      {/* ── KPI cards ── */}
+      <div className="kpi-row" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+        {[
+          { label: "總使用者數",       value: loading ? "…" : summary.total_users ?? 0,  sub: "已建立帳號",        col: "var(--accent)" },
+          { label: "活躍（7 天）",     value: loading ? "…" : summary.active_7d    ?? 0,  sub: "近 7 天登入過",    col: "#10b981" },
+          { label: "活躍（30 天）",    value: loading ? "…" : summary.active_30d   ?? 0,  sub: "近 30 天登入過",   col: "#06b6d4" },
+          { label: "今日登入次數",     value: loading ? "…" : summary.logins_today ?? 0,  sub: "今天",             col: "#f59e0b" },
+        ].map(k => (
+          <div key={k.label} className="kpi" style={{ borderTop: `3px solid ${k.col}` }}>
+            <div className="lbl">{k.label}</div>
+            <div className="val" style={{ color: k.col, fontSize: 28, fontWeight: 700 }}>{k.value}</div>
+            <div className="sub" style={{ color: "var(--text-muted)", fontSize: 12 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── User table ── */}
+      <div className="card">
+        <div className="card-head">
+          <h3>使用者登入紀錄</h3>
+          <span className="hint">{users.length} 位使用者</span>
+        </div>
+        <div className="card-body tight">
+          {loading ? (
+            <div className="empty">載入中…</div>
+          ) : users.length === 0 ? (
+            <div className="empty">尚無資料</div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.4fr 80px 80px 90px", gap: "0 8px",
+                            padding: "8px 14px", fontWeight: 600, fontSize: 12, color: "var(--text-muted)",
+                            borderBottom: "1px solid var(--border)" }}>
+                <div>使用者</div><div>角色</div><div>部門</div><div>最後登入</div>
+                <div style={{ textAlign: "right" }}>7 天</div>
+                <div style={{ textAlign: "right" }}>30 天</div>
+                <div>狀態</div>
+              </div>
+              {users.map(u => {
+                const dot = statusDot(u.last_login);
+                return (
+                  <div key={u.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.4fr 80px 80px 90px",
+                                           gap: "0 8px", padding: "10px 14px", alignItems: "center",
+                                           borderBottom: "1px solid var(--border-soft)", fontSize: 13 }}>
+                    {/* name + account */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--accent-soft)",
+                                    color: "var(--accent)", display: "grid", placeItems: "center",
+                                    fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
+                        {(u.name || "?")[0]}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{u.name || "—"}</div>
+                        <div style={{ color: "var(--text-muted)", fontSize: 11, fontFamily: "monospace" }}>{u.ad_account}</div>
+                      </div>
+                    </div>
+                    {/* role */}
+                    <div>
+                      <span className="tag-sm" style={{ color: ROLE_COLORS[u.role] }}>{ROLE_LABELS[u.role] || u.role}</span>
+                    </div>
+                    {/* dept */}
+                    <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{u.department || "—"}</div>
+                    {/* last login */}
+                    <div style={{ fontSize: 12 }}>{fmtDate(u.last_login)}</div>
+                    {/* 7d count */}
+                    <div style={{ textAlign: "right", fontWeight: 600, color: u.logins_7d > 0 ? "#10b981" : "var(--text-muted)" }}>
+                      {u.logins_7d ?? 0}
+                    </div>
+                    {/* 30d count */}
+                    <div style={{ textAlign: "right", fontWeight: 600, color: u.logins_30d > 0 ? "#06b6d4" : "var(--text-muted)" }}>
+                      {u.logins_30d ?? 0}
+                    </div>
+                    {/* status dot */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                        background: dot.cls === "dot-green" ? "#10b981" : dot.cls === "dot-amber" ? "#f59e0b" : "#ef4444"
+                      }} />
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{dot.label}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+
+      <style>{`
+        .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; }
+        .kpi .lbl { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+        .kpi .sub { margin-top: 2px; }
+      `}</style>
+    </>
+  );
+}
+
+Object.assign(window, { LibraryPage, AssignmentPage, PermissionsPage, ActivityPage });

@@ -342,6 +342,11 @@ async function apiDeleteRagEntry(entryId) {
   await apiFetch(`/api/rag/entries/${entryId}`, { method: "DELETE" });
 }
 
+// ── Login stats (admin only) ──────────────────────────────────────────
+async function apiFetchLoginStats() {
+  return apiFetch("/api/auth/stats/logins");
+}
+
 // ── Notifications ─────────────────────────────────────────────────────
 async function apiFetchNotifications() {
   const d = await apiFetch("/api/notifications");
@@ -375,6 +380,7 @@ window.API = {
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
+  fetchLoginStats:     apiFetchLoginStats,
   // AI Library
   fetchRagSystems:     apiFetchRagSystems,
   createRagSystem:     apiCreateRagSystem,

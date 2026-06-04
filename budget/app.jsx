@@ -219,6 +219,9 @@ function App() {
   } else if (route === "permissions") {
     body   = <PermissionsPage />;
     crumbs = ["權限管理中心"];
+  } else if (route === "activity") {
+    body   = <ActivityPage />;
+    crumbs = ["使用狀況"];
   } else if (route === "detail" && currentBudget) {
     body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onDelete={deleteBudget} onEdit={goEdit} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id];
