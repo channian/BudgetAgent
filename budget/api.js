@@ -254,6 +254,12 @@ async function apiFetchTimeline(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/timeline`);
   return d.timeline || [];
 }
+async function apiAcquireLock(dbId) {
+  return apiFetch(`/api/budgets/${dbId}/lock`, { method: "POST" });
+}
+async function apiReleaseLock(dbId) {
+  return apiFetch(`/api/budgets/${dbId}/lock`, { method: "DELETE" });
+}
 
 // ── Users ─────────────────────────────────────────────────────────────
 async function apiFetchUsers() {
@@ -377,6 +383,8 @@ window.API = {
   saveReview:          apiSaveReview,
   dispatch:            apiDispatchBudget,
   fetchTimeline:       apiFetchTimeline,
+  acquireLock:         apiAcquireLock,
+  releaseLock:         apiReleaseLock,
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,

@@ -23,13 +23,24 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
   const isAdmin  = role === "admin";
   const isFinal  = budget.status === "CLOSED" || budget.status === "REJECTED";
   const isOpen   = budget.status === "EXPERT_REVIEW" || budget.status === "PENDING_ACTION";
-  // Expert lock: if a specific expert is assigned, only that expert (or admin) may write.
-  const assignedExpert = (budget.expertName || "").trim();
-  const callerName     = (currentUser?.name || "").trim();
-  const isLockedOut    = isOpen && !isViewer && !isAdmin &&
-                         assignedExpert && callerName !== assignedExpert;
-  const canReview = isOpen && !isViewer && !isLockedOut;
-  const canSign   = isOpen && (role === "admin" || role === "boss"); // boss/admin 可簽核
+  const needsLock = isOpen && role === "expert";
+
+  // lockState: null (not started) | "busy" (acquiring) | {ok:true} | {ok:false, locked_by, expires_in}
+  const [lockState, setLockState] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!needsLock || !budget.dbId) return;
+    setLockState("busy");
+    API.acquireLock(budget.dbId)
+      .then(res => setLockState(res))
+      .catch(() => setLockState({ ok: false, locked_by: "（網路錯誤）", expires_in: 900 }));
+    return () => { API.releaseLock(budget.dbId).catch(() => {}); };
+  }, [budget.dbId, needsLock]);
+
+  const lockBusy      = needsLock && lockState === "busy";
+  const lockedByOther = needsLock && lockState && lockState !== "busy" && !lockState.ok;
+  const canReview = isOpen && role === "expert" && !lockBusy && !lockedByOther;
+  const canSign   = isOpen && (role === "admin" || role === "boss");
 
   const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
 
@@ -171,9 +182,14 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
               {isFinal && <ResultBadge result={budget.expertResult} />}
             </div>
             <div className="card-body">
-              {isLockedOut && (
+              {lockBusy && (
+                <div style={{ marginBottom: 14, padding: "10px 14px", background: "var(--border-soft)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "var(--text-muted)" }}>
+                  ⏳ 取得編輯權限中…
+                </div>
+              )}
+              {lockedByOther && (
                 <div style={{ marginBottom: 14, padding: "10px 14px", background: "var(--warn-soft)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "oklch(0.5 0.16 75)" }}>
-                  🔒 此案件已指派給「{assignedExpert}」，僅該專家或系統管理員可填寫評論。
+                  🔒 正在被「{lockState.locked_by}」編輯中，約 {Math.ceil((lockState.expires_in || 0) / 60)} 分鐘後釋放
                 </div>
               )}
               <div className="field" style={{ marginBottom: 14 }}>
