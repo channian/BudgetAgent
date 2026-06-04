@@ -5,12 +5,12 @@ Pipeline Step 1 — 案件初步分析與分類
 輸出：
   - pytollm_output.json  (全部案件)
   - system_defined.json  (系統已自動判定)
-  - system_unknown.json  (系統未知，需 LLM 人工判定)
-  - 自動將 system_unknown.json 複製到剪貼簿
+  - system_unknown.json  (系統未知)
+  - 若 USE_LOCAL_LLM=True：自動呼叫本地 Ollama 補完未知案件，結果複製到剪貼簿
+  - 若 USE_LOCAL_LLM=False：將 system_unknown.json 複製到剪貼簿（舊流程）
 
-下一步：將剪貼簿內容貼入 pensieve LLM，
-        取得未知案件的判定結果後，複製 LLM 回傳值，
-        再執行 pipeline_2.py
+下一步：執行 pipeline_2.py
+        （本地 LLM 模式下無須手動貼上任何內容）
 """
 
 import os, json
@@ -47,6 +47,17 @@ ERJIPEI_TRIGGER   = "二次配"
 JIANGUAN_TRIGGERS = ["法規", "結構安全", "違章"]
 GENERIC_PARTS     = ["法蘭", "蝶閥", "管帽"]
 
+# ── 本地 LLM 設定（Ollama）──────────────────────────────────────────────
+# USE_LOCAL_LLM = True  → 自動呼叫 Ollama 判定未知案件（免剪貼簿）
+# USE_LOCAL_LLM = False → 舊流程：複製到剪貼簿，手動貼入 pensieve
+USE_LOCAL_LLM  = True
+LLM_MODEL      = "qwen2.5:7b"          # Ollama 已下載的模型名稱
+OLLAMA_URL     = "http://localhost:11434"
+LLM_MAX_CHARS  = 3000                   # 每案件最多傳給 LLM 的文字長度（節省 token）
+
+LLM_WHITELIST = ["水務", "空壓", "空調", "電力", "安全", "消防", "資安",
+                 "AI自動化", "抽氣", "Relayout", "二次配", "建管"]
+
 EXPERT_DB = {
     "設備擴充 (UTI)": {"空調": ["黃金燦"], "空壓": ["郭于斌"], "水務": ["梁益齊"], "抽氣": ["梁益齊"], "電力": ["李明鴻"], "資安": ["王嘉漢"]},
     "工程擴廠 (新工)": {"Relayout": ["陳信舟", "鄭仁勝", "紀志忠"], "二次配": ["陳信舟", "鄭仁勝", "紀志忠"], "空調": ["鄭仁勝"], "水務": ["陳妍方"], "抽氣": ["陳妍方"]},
@@ -60,6 +71,58 @@ BOILERPLATE_NOISE = [
     "公司之財產", "資安關鍵字", "非我自身公務不過問", "不擅自邀請",
     "不揭露產品功能", "不傳遞信件", "禁止作為私人用途",
 ]
+
+
+def _load_system_prompt() -> str:
+    """Read classification_prompt.md from same directory."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "classification_prompt.md")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _llm_classify(case: dict, system_prompt: str) -> str:
+    """
+    Call local Ollama to get system classification for a single unknown case.
+    Returns the whitelist category string, or empty string on failure.
+    """
+    import urllib.request
+    import urllib.error
+
+    content_snippet = case.get("所有檔案原文(按檔案分段)", "")[:LLM_MAX_CHARS]
+    user_msg = (
+        f"案件名稱：{case['案件名稱']}\n"
+        f"檔案清單：\n{case.get('檔案實體清單', '')}\n\n"
+        f"文件內容（節錄）：\n{content_snippet}"
+    )
+
+    payload = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_msg},
+        ],
+        "stream": False,
+        "options": {"temperature": 0},
+    }, ensure_ascii=False).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            result = json.loads(resp.read())
+        raw = result["message"]["content"].strip()
+        # Strip any punctuation/brackets the model may add
+        cleaned = raw.strip("【】「」《》()（）.。,，\n\r\t ").split()[0] if raw else ""
+        return cleaned
+    except urllib.error.URLError:
+        print(f"    ⚠️  無法連線 Ollama（{OLLAMA_URL}）— 請確認 Ollama 已啟動且模型已下載")
+        return ""
+    except Exception as e:
+        print(f"    ⚠️  LLM 呼叫失敗：{e}")
+        return ""
 
 
 def extract_text(file_path):
@@ -216,10 +279,62 @@ def process():
     print(f"\n✅ 完成：{len(defined)} 筆已判定 / {len(unknown)} 筆未知")
 
     if unknown:
-        pyperclip.copy(json.dumps(unknown, indent=4, ensure_ascii=False))
-        print(f"📋 {len(unknown)} 筆未知案件已複製到剪貼簿")
-        print("   → 以 classification_prompt.md 為系統提示，貼入 pensieve LLM 取得判定，")
-        print("     複製回傳結果後執行 pipeline_2.py")
+        if USE_LOCAL_LLM:
+            print(f"\n🤖 啟用本地 LLM（{LLM_MODEL}），開始自動補完 {len(unknown)} 筆未知案件…")
+            try:
+                system_prompt = _load_system_prompt()
+            except FileNotFoundError:
+                print("❌ 找不到 classification_prompt.md，請確認檔案在同一資料夾")
+                system_prompt = None
+
+            resolved, still_unknown = [], []
+
+            if system_prompt:
+                for case in unknown:
+                    print(f"  分類中：{case['案件名稱']}")
+                    sys_result = _llm_classify(case, system_prompt)
+
+                    if sys_result in LLM_WHITELIST:
+                        case["判定系統"] = sys_result
+                        folder_header = (
+                            case["案件名稱"]
+                            + case.get("所有檔案原文(按檔案分段)", "")[:1500]
+                        ).upper()
+                        case["判定類別"] = classify_category(sys_result, folder_header)
+                        experts = EXPERT_DB.get(case["判定類別"], {}).get(sys_result, [])
+                        case["負責專家"] = ", ".join(experts) if experts else "待分配"
+                        resolved.append(case)
+                        print(f"    → ✅ {sys_result} / {case['判定類別']}")
+                    else:
+                        still_unknown.append(case)
+                        if sys_result:
+                            print(f"    → ⚠️  無效回應「{sys_result}」，保留為未知")
+                        else:
+                            print(f"    → ⚠️  LLM 無回應，保留為未知")
+            else:
+                still_unknown = unknown
+
+            # 更新 system_unknown.json（只保留仍未知的案件）
+            _save(os.path.join(WORK_DIR, "system_unknown.json"), still_unknown)
+
+            if resolved:
+                # 將 LLM 補完的案件複製到剪貼簿（pipeline_2 直接讀取，無須手動貼上）
+                pyperclip.copy(json.dumps(resolved, indent=4, ensure_ascii=False))
+                print(f"\n✅ LLM 自動補完 {len(resolved)} 筆 / 仍未知 {len(still_unknown)} 筆")
+                print("📋 已複製到剪貼簿，請執行 pipeline_2.py")
+            else:
+                pyperclip.copy("")
+                print(f"\n⚠️  LLM 全部判定失敗，{len(still_unknown)} 筆仍為未知")
+                print("   → 請改用手動流程：貼入 pensieve LLM 後執行 pipeline_2.py")
+
+            if still_unknown:
+                print(f"   ⚠️  仍未知案件已更新至 system_unknown.json，可手動補判後再執行 pipeline_2.py")
+        else:
+            # 舊剪貼簿流程
+            pyperclip.copy(json.dumps(unknown, indent=4, ensure_ascii=False))
+            print(f"📋 {len(unknown)} 筆未知案件已複製到剪貼簿")
+            print("   → 以 classification_prompt.md 為系統提示，貼入 pensieve LLM 取得判定，")
+            print("     複製回傳結果後執行 pipeline_2.py")
     else:
         print("   → 全部案件已自動判定，可直接執行 pipeline_2.py（剪貼簿留空即可）")
 
