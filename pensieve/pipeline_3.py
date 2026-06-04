@@ -11,7 +11,7 @@ Pipeline Step 3 — 儲存 AI 審核結果至 budget.json
 import json, os, re
 import pyperclip
 
-BUDGET_JSON = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\新增資料夾\pensieve回傳資料\budget.json"
+BUDGET_JSON = r"D:\AS\2026\預算AI Agent\新思路0409\系統flask\A1初步預算\budget.json"
 
 
 def parse_clipboard():

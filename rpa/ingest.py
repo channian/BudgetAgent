@@ -8,12 +8,10 @@ RPA 批次進件腳本 — budget.json 格式（含 AI 判決欄位）
   • 案件已審理，AI 資料有變       → 建立補送案件「X（補送）」
 """
 
-import os, json, hashlib, datetime, shutil
+import os, json, hashlib, datetime
 import psycopg2, psycopg2.extras
 
-# ⚠️ 請確認這兩個路徑在 RPA 機器上正確
-INPUT_FILE = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\新增資料夾\pensieve回傳資料\budget.json"
-BACKUP_DIR = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\A1 BACKUP"
+INPUT_FILE = r"D:\AS\2026\預算AI Agent\新思路0409\系統flask\A1初步預算\budget.json"
 
 DB_CONFIG = {
     "dbname":   "CIM",
@@ -183,12 +181,7 @@ def batch_process():
 
     cur.close()
     conn.close()
-
-    # ── 備份原始檔案（固定覆蓋，不加時間戳）────────────────────────
-    backup_path = os.path.join(BACKUP_DIR, "budget.json")
-    shutil.move(INPUT_FILE, backup_path)
     print(f"\n完成：{ok} 成功 / {fail} 失敗")
-    print(f"📦 原始檔案已備份至 {backup_path}")
 
 
 if __name__ == "__main__":
