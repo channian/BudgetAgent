@@ -1,8 +1,10 @@
 # 系統判定 Prompt — 廠務設備邏輯決策官
 
-> 此 prompt 用於 pensieve LLM 判定 `system_unknown.json`（pipeline_1 無法本地判定的案件）。
+> 此 prompt 由 `pipeline_1.py` 直接餵給本地 Ollama LLM（取代 pensieve），
+> 用於判定關鍵字規則無法判定的案件。
 > `pipeline_1.py` 的本地關鍵字分類已依此規則同步（ENTITY_MAPPING + 衝突解決優先序）；
 > 兩者規則需保持一致，修改時請同步更新。
+> LLM 僅輸出單一系統名稱；pipeline_1 會保證落在白名單內（重試 → 模糊比對 → 兜底）。
 
 ---
 

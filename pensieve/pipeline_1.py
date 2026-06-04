@@ -1,16 +1,19 @@
 """
-Pipeline Step 1 — 案件初步分析與分類
-═══════════════════════════════════════
+Pipeline Step 1 — 案件初步分析與分類（規則 + 本地 LLM，零未知）
+══════════════════════════════════════════════════════════════
+流程：先用關鍵字規則判定系統；規則無法判定的，交給本地 Ollama LLM 判定。
+      LLM 保證回傳白名單系統（重試 → 模糊比對 → 兜底），因此輸出 100% 已分配，
+      不會再有「未知系統」，pensieve 完全退出此步驟。
+
 輸入：網路資料夾（每個子資料夾 = 一個案件）
 輸出：
-  - pytollm_output.json  (全部案件)
-  - system_defined.json  (系統已自動判定)
-  - system_unknown.json  (系統未知)
-  - 若 USE_LOCAL_LLM=True：自動呼叫本地 Ollama 補完未知案件，結果複製到剪貼簿
-  - 若 USE_LOCAL_LLM=False：將 system_unknown.json 複製到剪貼簿（舊流程）
+  - pytollm_output.json   (全部案件，皆已分配系統)
+  - system_defined.json   (= 全部案件)
+  - system_unknown.json   (恆為空陣列，僅保留檔案相容性)
 
-下一步：執行 pipeline_2.py
-        （本地 LLM 模式下無須手動貼上任何內容）
+前置：Ollama 已啟動，且模型已下載（ollama pull qwen2.5:7b）。
+
+下一步：直接執行 pipeline_2.py（剪貼簿留空即可）。
 """
 
 import os, json
@@ -48,12 +51,15 @@ JIANGUAN_TRIGGERS = ["法規", "結構安全", "違章"]
 GENERIC_PARTS     = ["法蘭", "蝶閥", "管帽"]
 
 # ── 本地 LLM 設定（Ollama）──────────────────────────────────────────────
-# USE_LOCAL_LLM = True  → 自動呼叫 Ollama 判定未知案件（免剪貼簿）
-# USE_LOCAL_LLM = False → 舊流程：複製到剪貼簿，手動貼入 pensieve
-USE_LOCAL_LLM  = True
-LLM_MODEL      = "qwen2.5:7b"          # Ollama 已下載的模型名稱
+# pipeline_1 = 規則判定 + 本地 LLM 補完，輸出保證「零未知」，不再經 pensieve。
+#   主力推薦：qwen2.5:7b（夠準）；想更穩 → qwen2.5:14b；3B 級太小不建議當主力。
+LLM_MODEL      = "qwen2.5:7b"           # Ollama 已下載的模型名稱（ollama pull <name>）
 OLLAMA_URL     = "http://localhost:11434"
-LLM_MAX_CHARS  = 3000                   # 每案件最多傳給 LLM 的文字長度（節省 token）
+LLM_MAX_CHARS  = 3000                    # 每案件最多傳給 LLM 的文字長度（節省 token）
+LLM_RETRIES    = 2                       # LLM 回答無效時的重試次數
+# 兜底：LLM 連線/解析全失敗時的最終分類（保證不留未知）。
+# 依 classification_prompt.md「通用/模糊一律歸 Relayout」精神，預設 Relayout。
+LLM_FALLBACK_SYSTEM = "Relayout"
 
 LLM_WHITELIST = ["水務", "空壓", "空調", "電力", "安全", "消防", "資安",
                  "AI自動化", "抽氣", "Relayout", "二次配", "建管"]
@@ -80,11 +86,8 @@ def _load_system_prompt() -> str:
         return f.read()
 
 
-def _llm_classify(case: dict, system_prompt: str) -> str:
-    """
-    Call local Ollama to get system classification for a single unknown case.
-    Returns the whitelist category string, or empty string on failure.
-    """
+def _llm_call(case: dict, system_prompt: str, strict: bool = False) -> str:
+    """Send one case to Ollama, return the raw model text ('' on connection error)."""
     import urllib.request
     import urllib.error
 
@@ -94,6 +97,11 @@ def _llm_classify(case: dict, system_prompt: str) -> str:
         f"檔案清單：\n{case.get('檔案實體清單', '')}\n\n"
         f"文件內容（節錄）：\n{content_snippet}"
     )
+    if strict:
+        user_msg += (
+            "\n\n【重要】只能輸出以下其中一個詞，不得有任何其他文字："
+            + "、".join(LLM_WHITELIST)
+        )
 
     payload = json.dumps({
         "model": LLM_MODEL,
@@ -111,18 +119,47 @@ def _llm_classify(case: dict, system_prompt: str) -> str:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
-        raw = result["message"]["content"].strip()
-        # Strip any punctuation/brackets the model may add
-        cleaned = raw.strip("【】「」《》()（）.。,，\n\r\t ").split()[0] if raw else ""
-        return cleaned
+        return (result.get("message", {}).get("content") or "").strip()
     except urllib.error.URLError:
         print(f"    ⚠️  無法連線 Ollama（{OLLAMA_URL}）— 請確認 Ollama 已啟動且模型已下載")
         return ""
     except Exception as e:
         print(f"    ⚠️  LLM 呼叫失敗：{e}")
         return ""
+
+
+def _normalize_to_whitelist(raw: str) -> str:
+    """Map raw LLM text to a valid whitelist category, or '' if none recognised."""
+    if not raw:
+        return ""
+    cleaned = raw.strip("【】「」《》()（）.。,，、:：\n\r\t ")
+    tokens = cleaned.split()
+    if tokens and tokens[0] in LLM_WHITELIST:
+        return tokens[0]
+    if cleaned in LLM_WHITELIST:
+        return cleaned
+    # 模糊比對：白名單詞出現在回應任何位置
+    for cat in LLM_WHITELIST:
+        if cat in raw:
+            return cat
+    return ""
+
+
+def _llm_classify(case: dict, system_prompt: str) -> str:
+    """
+    保證回傳一個白名單系統：重試 → 模糊比對 → 兜底 fallback，絕不回「未知」。
+    """
+    for attempt in range(LLM_RETRIES):
+        raw = _llm_call(case, system_prompt, strict=(attempt > 0))
+        sysname = _normalize_to_whitelist(raw)
+        if sysname:
+            return sysname
+        if raw:
+            print(f"    ↻ 第 {attempt + 1} 次回應無效「{raw[:30]}」，重試…")
+    print(f"    ↪ 連續無效，套用兜底分類：{LLM_FALLBACK_SYSTEM}")
+    return LLM_FALLBACK_SYSTEM
 
 
 def extract_text(file_path):
@@ -267,76 +304,44 @@ def process():
             "所有檔案原文(按檔案分段)": full_text,
         })
 
-    # 存全量
-    _save(os.path.join(WORK_DIR, "pytollm_output.json"), all_cases)
+    # ── 本地 LLM 補完規則無法判定的案件（取代 pensieve）────────────────
+    rule_unknown = [c for c in all_cases if c["判定系統"] == "未知"]
+    if rule_unknown:
+        print(f"\n🤖 規則判定剩 {len(rule_unknown)} 筆未知 → 本地 LLM（{LLM_MODEL}）補完…")
+        try:
+            system_prompt = _load_system_prompt()
+        except FileNotFoundError:
+            print("❌ 找不到 classification_prompt.md，將全部套用兜底分類")
+            system_prompt = None
 
-    # 分流
-    defined = [c for c in all_cases if c["判定系統"] != "未知"]
-    unknown = [c for c in all_cases if c["判定系統"] == "未知"]
-    _save(os.path.join(WORK_DIR, "system_defined.json"), defined)
-    _save(os.path.join(WORK_DIR, "system_unknown.json"), unknown)
-
-    print(f"\n✅ 完成：{len(defined)} 筆已判定 / {len(unknown)} 筆未知")
-
-    if unknown:
-        if USE_LOCAL_LLM:
-            print(f"\n🤖 啟用本地 LLM（{LLM_MODEL}），開始自動補完 {len(unknown)} 筆未知案件…")
-            try:
-                system_prompt = _load_system_prompt()
-            except FileNotFoundError:
-                print("❌ 找不到 classification_prompt.md，請確認檔案在同一資料夾")
-                system_prompt = None
-
-            resolved, still_unknown = [], []
-
+        for case in rule_unknown:
+            print(f"  分類中：{case['案件名稱']}")
             if system_prompt:
-                for case in unknown:
-                    print(f"  分類中：{case['案件名稱']}")
-                    sys_result = _llm_classify(case, system_prompt)
-
-                    if sys_result in LLM_WHITELIST:
-                        case["判定系統"] = sys_result
-                        folder_header = (
-                            case["案件名稱"]
-                            + case.get("所有檔案原文(按檔案分段)", "")[:1500]
-                        ).upper()
-                        case["判定類別"] = classify_category(sys_result, folder_header)
-                        experts = EXPERT_DB.get(case["判定類別"], {}).get(sys_result, [])
-                        case["負責專家"] = ", ".join(experts) if experts else "待分配"
-                        resolved.append(case)
-                        print(f"    → ✅ {sys_result} / {case['判定類別']}")
-                    else:
-                        still_unknown.append(case)
-                        if sys_result:
-                            print(f"    → ⚠️  無效回應「{sys_result}」，保留為未知")
-                        else:
-                            print(f"    → ⚠️  LLM 無回應，保留為未知")
+                sys_result = _llm_classify(case, system_prompt)
             else:
-                still_unknown = unknown
+                sys_result = LLM_FALLBACK_SYSTEM
+            # _llm_classify 保證回傳白名單系統，絕不留未知
+            case["判定系統"] = sys_result
+            folder_header = (
+                case["案件名稱"] + case.get("所有檔案原文(按檔案分段)", "")[:1500]
+            ).upper()
+            case["判定類別"] = classify_category(sys_result, folder_header)
+            experts = EXPERT_DB.get(case["判定類別"], {}).get(sys_result, [])
+            case["負責專家"] = ", ".join(experts) if experts else "待分配"
+            print(f"    → ✅ {sys_result} / {case['判定類別']}")
 
-            # 更新 system_unknown.json（只保留仍未知的案件）
-            _save(os.path.join(WORK_DIR, "system_unknown.json"), still_unknown)
+    # 此時 all_cases 已 100% 分配完成，無未知系統
+    rule_count = len(all_cases) - len(rule_unknown)
+    _save(os.path.join(WORK_DIR, "pytollm_output.json"), all_cases)
+    _save(os.path.join(WORK_DIR, "system_defined.json"), all_cases)
+    _save(os.path.join(WORK_DIR, "system_unknown.json"), [])   # 恆為空，保留檔案相容性
 
-            if resolved:
-                # 將 LLM 補完的案件複製到剪貼簿（pipeline_2 直接讀取，無須手動貼上）
-                pyperclip.copy(json.dumps(resolved, indent=4, ensure_ascii=False))
-                print(f"\n✅ LLM 自動補完 {len(resolved)} 筆 / 仍未知 {len(still_unknown)} 筆")
-                print("📋 已複製到剪貼簿，請執行 pipeline_2.py")
-            else:
-                pyperclip.copy("")
-                print(f"\n⚠️  LLM 全部判定失敗，{len(still_unknown)} 筆仍為未知")
-                print("   → 請改用手動流程：貼入 pensieve LLM 後執行 pipeline_2.py")
+    # 清空剪貼簿：pipeline_2 直接讀 system_defined.json，不需任何貼上
+    pyperclip.copy("")
 
-            if still_unknown:
-                print(f"   ⚠️  仍未知案件已更新至 system_unknown.json，可手動補判後再執行 pipeline_2.py")
-        else:
-            # 舊剪貼簿流程
-            pyperclip.copy(json.dumps(unknown, indent=4, ensure_ascii=False))
-            print(f"📋 {len(unknown)} 筆未知案件已複製到剪貼簿")
-            print("   → 以 classification_prompt.md 為系統提示，貼入 pensieve LLM 取得判定，")
-            print("     複製回傳結果後執行 pipeline_2.py")
-    else:
-        print("   → 全部案件已自動判定，可直接執行 pipeline_2.py（剪貼簿留空即可）")
+    print(f"\n✅ 完成：共 {len(all_cases)} 筆全部判定完成"
+          f"（規則 {rule_count} 筆 / LLM {len(rule_unknown)} 筆），無未知系統")
+    print("   → 直接執行 pipeline_2.py（剪貼簿留空即可，pensieve 已不需介入此步）")
 
 
 def _save(path, data):
