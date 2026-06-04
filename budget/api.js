@@ -342,6 +342,11 @@ async function apiDeleteRagEntry(entryId) {
   await apiFetch(`/api/rag/entries/${entryId}`, { method: "DELETE" });
 }
 
+// ── HR employee lookup (admin only) ──────────────────────────────────
+async function apiLookupEmployee(empno) {
+  return apiFetch(`/api/auth/lookup_employee?empno=${encodeURIComponent(empno)}`);
+}
+
 // ── Login stats (admin only) ──────────────────────────────────────────
 async function apiFetchLoginStats() {
   return apiFetch("/api/auth/stats/logins");
@@ -380,6 +385,7 @@ window.API = {
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
+  lookupEmployee:      apiLookupEmployee,
   fetchLoginStats:     apiFetchLoginStats,
   // AI Library
   fetchRagSystems:     apiFetchRagSystems,

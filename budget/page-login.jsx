@@ -34,23 +34,23 @@ function LoginPage({ onLogin }) {
         </div>
 
         <h1>歡迎回來</h1>
-        <div className="sub">透過 Active Directory 帳號登入</div>
+        <div className="sub">使用員工編號及 Windows 密碼登入</div>
 
         <div className="field">
           <label>
-            使用者帳號
-            <span className="label-hint">AD</span>
+            員工編號
+            <span className="label-hint">empno</span>
           </label>
           <input
             value={user}
             onChange={(e) => setUser(e.target.value)}
-            placeholder="example: liao.jianxun"
+            placeholder="例：K20076"
             autoFocus
             autoComplete="username"
           />
         </div>
         <div className="field">
-          <label>密碼</label>
+          <label>Windows 密碼</label>
           <input
             type="password"
             value={pwd}
@@ -67,8 +67,8 @@ function LoginPage({ onLogin }) {
         </button>
 
         <div className="login-foot">
-          <span><span className="status-dot"/>AD 服務正常</span>
-          <span>v2.4.1 · build 20260518</span>
+          <span>帳號由系統管理員開通</span>
+          <span>v2.4.1 · build 20260604</span>
         </div>
       </form>
     </div>

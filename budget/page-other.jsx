@@ -727,14 +727,33 @@ function PermissionsPage() {
 
               <div className="field-row two">
                 <div className="field">
-                  <label>AD 帳號 <span className="req">*</span></label>
-                  <input type="text" value={form.ad_account} onChange={e => set("ad_account", e.target.value)}
-                    placeholder="例：john.doe" disabled={modal !== "new"}
-                    style={{ opacity: modal !== "new" ? 0.5 : 1 }}/>
+                  <label>員工編號 (empno) <span className="req">*</span></label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input type="text" value={form.ad_account} onChange={e => set("ad_account", e.target.value)}
+                      placeholder="例：K20076" disabled={modal !== "new"}
+                      style={{ opacity: modal !== "new" ? 0.5 : 1, flex: 1 }}/>
+                    {modal === "new" && (
+                      <button type="button" className="btn sm ghost"
+                        title="從 HR 系統查詢姓名與 Email"
+                        onClick={async () => {
+                          const empno = form.ad_account.trim();
+                          if (!empno) { setSaveErr("請先輸入員工編號"); return; }
+                          setSaveErr("");
+                          try {
+                            const res = await API.lookupEmployee(empno);
+                            if (res.found) {
+                              setForm(f => ({ ...f, name: res.name || f.name, email: res.email || f.email }));
+                            } else {
+                              setSaveErr(`HR 系統查無 empno：${empno}`);
+                            }
+                          } catch (e) { setSaveErr(e.message); }
+                        }}>查詢</button>
+                    )}
+                  </div>
                 </div>
                 <div className="field">
                   <label>Email</label>
-                  <input type="text" value={form.email} onChange={e => set("email", e.target.value)} placeholder="選填"/>
+                  <input type="text" value={form.email} onChange={e => set("email", e.target.value)} placeholder="選填，查詢後自動帶入"/>
                 </div>
               </div>
 
