@@ -23,7 +23,7 @@ SECRET_KEY = "pensieve-internal-2026"
 # Service account used only for read-only email lookups (not for user login).
 # Leave LDAP_SERVER blank to disable AD lookup entirely.
 import os
-LDAP_SERVER   = os.getenv("LDAP_SERVER",   "")          # e.g. "10.10.51.10"
+LDAP_SERVER   = os.getenv("LDAP_SERVER",   "10.10.10.2")    # KHADDC04
 LDAP_DOMAIN   = os.getenv("LDAP_DOMAIN",   "ASE")       # NetBIOS domain name
 LDAP_BASE_DN  = os.getenv("LDAP_BASE_DN",  "DC=ase,DC=com,DC=tw")
 LDAP_BIND_USER = os.getenv("LDAP_BIND_USER", "")        # service account sAMAccountName
