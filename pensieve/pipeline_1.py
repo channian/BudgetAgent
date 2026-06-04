@@ -20,18 +20,31 @@ import pyperclip
 INPUT_PATH = r"\\khfs4\4600$\01.Leon Yi\01.FAC2\預算\Leon WBS專案預算簽核系統\預算審核"
 WORK_DIR   = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\初步審核"
 
-# ── 系統關鍵字對照表 ──────────────────────────────────────────────────
+# ── 系統關鍵字對照表（依「廠務設備邏輯決策官」白名單 v2）──────────────
+# 白名單：水務 / 空壓 / 空調 / 電力 / 安全 / 消防 / 監控 / 資安 / AI自動化 /
+#         抽氣 / Relayout / 二次配 / 建管
+# 註：資安 / 二次配 無固定關鍵字 — 由衝突解決規則或 LLM 判定（見下方規則）。
 ENTITY_MAPPING = {
-    "水務":    ["SIO2分析儀", "矽分析儀", "生活污水", "污水泵", "沉水馬達", "廢水", "RO", "純水", "加藥", "水管", "水箱", "洗滌塔", "熱泵", "回收水"],
-    "空壓":    ["空壓機", "乾燥機", "CDA", "真空機"],
-    "空調":    ["冰機", "冰水系統", "PCW", "MAU", "FFU", "空調備援", "冷氣", "冷卻水塔", "冷風機"],
-    "電力":    ["電盤", "變壓器", "UPS", "發電機", "高壓配電", "斷路器", "電纜"],
-    "消防":    ["消防工程", "消防栓", "偵煙器", "灑水頭", "防火間隔", "防火門"],
-    "建管":    ["建置案", "餐廳建置", "辦公室裝修", "庫板", "天花板", "隔間", "室裝"],
-    "監控":    ["SCADA系統", "PLC程式", "中控系統", "中央監控", "自動化監測"],
-    "AI自動化":["深度學習", "影像辨識系統", "模型訓練", "AI演算法", "機器學習"],
-    "Relayout":["機台移位", "機台配置", "佈局調整", "RELAYOUT", "二次配", "拆機", "機台放置"],
+    "水務":    ["MBR", "廢水", "回收水", "RO", "超純水", "純水", "生活污水", "污水泵", "沉水馬達", "SiO2分析儀", "矽分析儀", "藥槽區", "污泥", "加藥", "水箱", "熱泵(節能水)", "給排水"],
+    "空壓":    ["空壓機", "乾燥機", "CDA", "真空", "外熱式乾燥機"],
+    "空調":    ["冷卻水塔", "冰水機", "PCW", "MAU", "FFU", "溫濕度", "空調備援", "冷氣", "熱泵(空調系)", "換氣風機"],
+    "電力":    ["電盤", "變壓器", "UPS", "發電機", "GCB", "斷路器", "電力主系統", "配電箱", "照明", "變電站"],
+    "安全":    ["公危倉", "化學品泄露", "緊急應變", "洗眼器", "防護衣"],
+    "消防":    ["防火門", "消防栓", "偵煙器", "廣播系統", "灑水頭", "消防法規", "消防泵"],
+    "監控":    ["SCADA", "PLC", "自動化監測", "中控系統", "CCTV", "MOF電錶"],
+    "AI自動化":["影像辨識模型", "深度學習", "AI演算法"],
+    "抽氣":    ["RRTO", "RTO", "沸石滾輪", "Scrubber", "洗滌塔", "有機排氣", "無機排氣", "排氣管路", "風車", "異味改善", "抽氣馬達"],
+    "建管":    ["建置案", "餐廳建置", "老舊建物改善", "園管區", "結構安全", "防水工程"],
+    "Relayout":["機台移位", "空間規劃", "隔間拆除", "裝修", "家具配置", "佈局調整"],
 }
+
+# ── 衝突解決優先序觸發詞（高 → 低，對應 classification_prompt.md）────────
+RELAYOUT_TRIGGERS = ["家具配置", "家具", "隔間", "空間規劃", "空間調整", "空間",
+                     "裝修", "拆除", "拆機", "機台進駐", "機台移位", "機台放置",
+                     "CLASS增設", "RELAYOUT", "佈局調整", "佈局"]
+ERJIPEI_TRIGGER   = "二次配"
+JIANGUAN_TRIGGERS = ["法規", "結構安全", "違章"]
+GENERIC_PARTS     = ["法蘭", "蝶閥", "管帽"]
 
 EXPERT_DB = {
     "設備擴充 (UTI)": {"空調": ["黃金燦"], "空壓": ["郭于斌"], "水務": ["梁益齊"], "抽氣": ["梁益齊"], "電力": ["李明鴻"], "監控": ["王嘉漢"]},
@@ -72,41 +85,85 @@ def extract_text(file_path):
     return "[注意：此檔案內容提取受限]"
 
 
-def find_best_system(content, folder_name):
-    folder_up  = folder_name.upper()
-    content_up = content.upper()
-    for noise in BOILERPLATE_NOISE:
-        content_up = content_up.replace(noise.upper(), "")
+def _systems_in_text(text_up):
+    """回傳 {系統: 關鍵字最後出現位置}，供「名稱含多系統取後者」判斷使用。"""
+    found = {}
+    for sys, kws in ENTITY_MAPPING.items():
+        pos = max((text_up.rfind(kw.upper()) for kw in kws), default=-1)
+        if pos >= 0:
+            found[sys] = pos
+    return found
 
-    # 資料夾名稱直接命中 → 採用
-    title_hits = [s for s, kws in ENTITY_MAPPING.items()
-                  if any(kw.upper() in folder_up for kw in kws)]
-    if len(title_hits) == 1:
-        return title_hits[0]
+
+def find_best_system(content, folder_name):
+    """依「廠務設備邏輯決策官」衝突解決優先序判斷唯一系統；無法判定回傳「未知」。"""
+    raw_name = folder_name or ""
+    raw_all  = f"{folder_name} {content}"
+    name_up  = raw_name.upper()
+    text_up  = raw_all.upper()
+    for noise in BOILERPLATE_NOISE:
+        text_up = text_up.replace(noise.upper(), "")
+
+    # 1) Relayout 最高優先：空間/裝修/家具/拆除/機台進駐 …
+    if any(t.upper() in text_up for t in RELAYOUT_TRIGGERS):
+        return "Relayout"
+
+    # 2) 二次配 次高優先
+    if ERJIPEI_TRIGGER in raw_all:
+        return "二次配"
+
+    # 3) 建管：僅限法規 / 結構安全 / 違章
+    if any(t in raw_all for t in JIANGUAN_TRIGGERS):
+        return "建管"
+
+    # 6) 專案名稱含二個系統 → 以後者（出現位置較後）為準
+    name_systems = _systems_in_text(name_up)
+    if len(name_systems) >= 2:
+        return max(name_systems, key=name_systems.get)
 
     # 關鍵字頻率計分
-    scores = {s: sum(content_up.count(kw.upper()) * 5 for kw in kws)
-              for s, kws in ENTITY_MAPPING.items()}
-    total = sum(scores.values())
-    if total < 15:
+    scores  = {s: sum(text_up.count(kw.upper()) for kw in kws)
+               for s, kws in ENTITY_MAPPING.items()}
+    nonzero = {s: sc for s, sc in scores.items() if sc > 0}
+
+    # 4) 通用組件（法蘭/蝶閥/管帽）且無明確主體 → Relayout
+    if not nonzero and any(g in raw_all for g in GENERIC_PARTS):
+        return "Relayout"
+
+    if not nonzero:
+        # 名稱命中單一系統也採用
+        if len(name_systems) == 1:
+            return next(iter(name_systems))
         return "未知"
 
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    # 5) 多系統且含 Relayout → Relayout
+    if len(nonzero) >= 2 and "Relayout" in nonzero:
+        return "Relayout"
+
+    ranked = sorted(nonzero.items(), key=lambda x: x[1], reverse=True)
     best, best_score = ranked[0]
     second_score     = ranked[1][1] if len(ranked) > 1 else 0
-    if (best_score / total) < 0.70 or ((best_score - second_score) / total) < 0.40:
+
+    # 7) 多系統分數相同無法分辨 → 交給 LLM（依各系統預算金額最高者判定）
+    if second_score == best_score:
         return "未知"
     return best
 
 
 def classify_category(system, folder_and_header):
-    if system in ("AI自動化", "監控"):
+    # CIM 相關：監控 / AI自動化 / 資安
+    if system in ("AI自動化", "監控", "資安"):
         return "CIM相關"
-    if system in ("消防", "建管"):
+    # 法遵 (ESH)：消防 / 建管 / 安全
+    if system in ("消防", "建管", "安全"):
         return "法遵 (ESH)"
+    # 工程擴廠 (新工)：二次配 / Relayout 一律歸新工
+    if system in ("二次配", "Relayout"):
+        return "工程擴廠 (新工)"
     if system == "未知":
         return "未知"
-    new_keywords = ["修繕", "建置", "新建", "整改", "備援", "RELAYOUT"]
+    # 其餘設備系統：依關鍵字判斷新建工程或既有設備擴充
+    new_keywords = ["修繕", "建置", "新建", "整改", "備援", "RELAYOUT", "擴建", "新增"]
     return "工程擴廠 (新工)" if any(k in folder_and_header for k in new_keywords) else "設備擴充 (UTI)"
 
 
@@ -160,7 +217,8 @@ def process():
     if unknown:
         pyperclip.copy(json.dumps(unknown, indent=4, ensure_ascii=False))
         print(f"📋 {len(unknown)} 筆未知案件已複製到剪貼簿")
-        print("   → 貼入 pensieve LLM 取得判定，複製回傳結果後執行 pipeline_2.py")
+        print("   → 以 classification_prompt.md 為系統提示，貼入 pensieve LLM 取得判定，")
+        print("     複製回傳結果後執行 pipeline_2.py")
     else:
         print("   → 全部案件已自動判定，可直接執行 pipeline_2.py（剪貼簿留空即可）")
 
