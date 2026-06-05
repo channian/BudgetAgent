@@ -24,7 +24,7 @@ SECRET_KEY = "pensieve-internal-2026"
 # Leave LDAP_SERVER blank to disable AD lookup entirely.
 import os
 LDAP_SERVER   = os.getenv("LDAP_SERVER",   "10.10.10.2")    # KHADDC04
-LDAP_DOMAIN   = os.getenv("LDAP_DOMAIN",   "ASE")       # NetBIOS domain name
+LDAP_DOMAIN   = os.getenv("LDAP_DOMAIN",   "KH")       # NetBIOS domain name
 LDAP_BASE_DN  = os.getenv("LDAP_BASE_DN",  "DC=ase,DC=com,DC=tw")
 LDAP_BIND_USER = os.getenv("LDAP_BIND_USER", "")        # service account sAMAccountName
 LDAP_BIND_PASS = os.getenv("LDAP_BIND_PASS", "")        # service account password
