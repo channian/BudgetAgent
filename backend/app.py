@@ -1,4 +1,6 @@
-import os
+import os, logging
+logging.basicConfig(level=logging.WARNING,
+                    format="%(levelname)s [%(name)s] %(message)s")
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 from config import SECRET_KEY
