@@ -1,6 +1,24 @@
 """
-RPA 批次進件腳本 — budget.json 格式（含 AI 判決欄位）
-讀取單一 JSON 檔（物件或陣列皆可），將每筆案件寫入 budget.budget_requests。
+RPA 手動補入腳本（備援用，非主流程）
+══════════════════════════════════════════════════════════════
+⚠️  主流程已改為：
+      pipeline_1.py（分類）→ pipeline_2.py（AI 審核 + 直接寫 DB）
+    正常情況下不需要執行此腳本。
+
+【此腳本的使用場景】
+  - 手動補入一份已處理好的 budget.json（格式見下方），繞過 pipeline 直接寫 DB。
+  - 適用於：pipeline 跑完後需要個別重補、或從舊格式備份還原案件。
+
+【budget.json 格式】（單一物件或陣列皆可）
+  {
+    "案件名稱": "...",
+    "判定類別": "...",
+    "判定系統": "...",
+    "負責專家": "...",
+    "原因": "...",
+    "最終決策": "通過 | 退件",
+    "AI對於保留案件的信心分數": 60
+  }
 
 補送邏輯：
   • 相同 AI 資料重複掃描         → 忽略
@@ -8,12 +26,10 @@ RPA 批次進件腳本 — budget.json 格式（含 AI 判決欄位）
   • 案件已審理，AI 資料有變       → 建立補送案件「X（補送）」
 """
 
-import os, json, hashlib, datetime, shutil
+import os, json, hashlib, datetime
 import psycopg2, psycopg2.extras
 
-# ⚠️ 請確認這兩個路徑在 RPA 機器上正確
-INPUT_FILE = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\新增資料夾\pensieve回傳資料\budget.json"
-BACKUP_DIR = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\系統flask\A1 BACKUP"
+INPUT_FILE = r"D:\AS\2026\預算AI Agent\新思路0409\系統flask\A1初步預算\budget.json"
 
 DB_CONFIG = {
     "dbname":   "CIM",
@@ -92,7 +108,6 @@ def batch_process():
         return
 
     print(f"📂 讀取到 {len(records)} 筆案件，開始匯入…")
-    os.makedirs(BACKUP_DIR, exist_ok=True)
 
     conn = psycopg2.connect(**DB_CONFIG)
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -183,13 +198,7 @@ def batch_process():
 
     cur.close()
     conn.close()
-
-    # ── 備份原始檔案 ─────────────────────────────────────────────────
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"budget_{stamp}.json")
-    shutil.move(INPUT_FILE, backup_path)
     print(f"\n完成：{ok} 成功 / {fail} 失敗")
-    print(f"📦 原始檔案已備份至 {backup_path}")
 
 
 if __name__ == "__main__":

@@ -13,9 +13,10 @@ AI Agent 預算審核平台 (AI Agent Budget Review Platform) — an internal we
 ## Tech Context
 
 - Frontend design files will be added to the repo (pending upload). All UI follows a Pinterest-style warm aesthetic: warm cream base, coral/berry accent colors, rounded corners.
-- Backend connects to an existing PostgreSQL database (`CIM` dbname, `budget` schema). **Current host: `10.10.28.170:5432`** (set in `backend/config.py`; note `rpa/ingest.py` still has the old `10.10.51.98` — see HANDOVER.md §6).
-- The DB schema is already provisioned per v1.2 spec — do not alter table definitions, only write application logic against the existing schema.
-- RPA deposits AI-generated JSON files into a watched input folder; a batch processor ingests them into the DB.
+- Backend connects to an existing PostgreSQL database (`CIM` dbname, `budget` schema). **Current host: `10.10.28.170:5432`** (set in `backend/config.py`; `rpa/ingest.py` and `pensieve/pipeline_3.py` also point at this host).
+- The DB schema is already provisioned per v1.2 spec — do not alter the core table definitions, only write application logic against the existing schema. (Exceptions: `rag_systems` / `rag_entries` and the `login_logs` table + `locked_by`/`locked_at` columns ARE created by the app via `CREATE TABLE / ALTER TABLE IF NOT EXISTS` on boot.)
+- RPA / pensieve pipeline deposits AI-generated JSON into `budget.json`; `pensieve/pipeline_3.py` (clipboard → DB) or `rpa/ingest.py` (file → DB) ingests them with smart dedup / 補送 logic.
+- Auth: empno (employee number, = Windows sAMAccountName) is the login id. AD server `10.10.10.2` (KHADDC04) validates the Windows password via NTLM; accounts must be pre-created (whitelist) in 權限管理中心. Name/email auto-synced from `base.kh_ad_employees` by empno.
 
 ## Database Schema (budget schema, already provisioned)
 
@@ -152,16 +153,25 @@ INSERT must use `ON CONFLICT (project_name) DO UPDATE` and `RETURNING db_id`.
 
 ## Navigation Modules & RBAC
 
-| Module | Role Required |
-|--------|--------------|
-| 待簽核案件 | 審核人 / 專家 |
-| 已簽核完成 | 全員 |
-| AI Agent 圖書館 | 全員 |
-| 派發中心人員設定 | 系統管理員 |
-| 權限管理中心 | 系統管理員 |
+| Module | Role Required | Status |
+|--------|--------------|--------|
+| 待簽核 | 全員（簽核動作限 boss/admin；專家評論限 expert/admin） | done |
+| 已簽核完成 | 全員 | done |
+| AI Agent 圖書館 | 全員（檢視）；entries 限 expert/admin 寫入；systems 限 admin | done |
+| 派發中心人員設定 | 系統管理員 | done — 派發 + 寄信 + 確認框 |
+| 權限管理中心 | 系統管理員 | done — 使用者 CRUD、empno 開通、HR 查詢帶入 |
+| 使用狀況 | 系統管理員 | done — 登入紀錄 / 活躍度儀表板（`budget.login_logs`） |
 
-Authentication is via Windows AD (Active Directory). On login, sync `name`, `department`, `role` from org directory into session.
+Authentication is via Windows AD (NTLM, server `10.10.10.2`) using empno as the
+login id; falls back to local password hash if AD is unreachable. On AD success,
+`name` / `email` are synced from `base.kh_ad_employees` by empno. Accounts are
+whitelist-only — no auto-provisioning.
+
+**Concurrency lock**: the expert review form acquires a 15-min edit lock
+(`locked_by` / `locked_at` on `budget_requests`) via `POST /api/budgets/<id>/lock`.
+Any expert may open a case, but only the lock holder can submit; others see a
+"正在被 X 編輯中" banner. Lock auto-releases on save, on page leave, or after TTL.
 
 ## Development Branch
 
-Active development branch: `claude/elegant-dijkstra-fxlPR`
+Active development branch: `main` (changes pushed directly to `main`).

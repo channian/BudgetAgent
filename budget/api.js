@@ -52,7 +52,15 @@ function copyToClipboard(text) {
 window.copyToClipboard = copyToClipboard;
 
 // ── Category name ↔ frontend colour ID ───────────────────────────────
+// Real business categories produced by pensieve/pipeline_1.py classify_category().
+// Each maps to one of 5 chip colour slots (RD/MKT/OPS/HR/IT) defined in styles.css.
 const CAT_NAME_TO_ID = {
+  "設備擴充 (UTI)": "OPS",   // amber
+  "工程擴廠 (新工)": "RD",    // purple
+  "CIM相關":        "IT",    // blue
+  "法遵 (ESH)":     "MKT",   // red
+  "未知":           "HR",    // teal
+  // legacy demo categories (kept for backward compatibility)
   "研發費用": "RD",
   "行銷推廣": "MKT",
   "營運支援": "OPS",
@@ -254,6 +262,18 @@ async function apiFetchTimeline(dbId) {
   const d = await apiFetch(`/api/budgets/${dbId}/timeline`);
   return d.timeline || [];
 }
+async function apiBatchSign(dbIds) {
+  return apiFetch("/api/budgets/batch-sign", {
+    method: "POST",
+    body: JSON.stringify({ ids: dbIds }),
+  });
+}
+async function apiAcquireLock(dbId) {
+  return apiFetch(`/api/budgets/${dbId}/lock`, { method: "POST" });
+}
+async function apiReleaseLock(dbId) {
+  return apiFetch(`/api/budgets/${dbId}/lock`, { method: "DELETE" });
+}
 
 // ── Users ─────────────────────────────────────────────────────────────
 async function apiFetchUsers() {
@@ -342,6 +362,16 @@ async function apiDeleteRagEntry(entryId) {
   await apiFetch(`/api/rag/entries/${entryId}`, { method: "DELETE" });
 }
 
+// ── HR employee lookup (admin only) ──────────────────────────────────
+async function apiLookupEmployee(empno) {
+  return apiFetch(`/api/auth/lookup_employee?empno=${encodeURIComponent(empno)}`);
+}
+
+// ── Login stats (admin only) ──────────────────────────────────────────
+async function apiFetchLoginStats() {
+  return apiFetch("/api/auth/stats/logins");
+}
+
 // ── Notifications ─────────────────────────────────────────────────────
 async function apiFetchNotifications() {
   const d = await apiFetch("/api/notifications");
@@ -367,6 +397,9 @@ window.API = {
   saveReview:          apiSaveReview,
   dispatch:            apiDispatchBudget,
   fetchTimeline:       apiFetchTimeline,
+  batchSign:           apiBatchSign,
+  acquireLock:         apiAcquireLock,
+  releaseLock:         apiReleaseLock,
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,
@@ -375,6 +408,8 @@ window.API = {
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
+  lookupEmployee:      apiLookupEmployee,
+  fetchLoginStats:     apiFetchLoginStats,
   // AI Library
   fetchRagSystems:     apiFetchRagSystems,
   createRagSystem:     apiCreateRagSystem,

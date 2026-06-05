@@ -10,6 +10,21 @@ budgets_bp = Blueprint("budgets", __name__)
 PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"]
 COMPLETED_STATUSES = ["CLOSED", "REJECTED"]
 
+LOCK_TTL = 900  # seconds — 15-minute concurrency lock
+
+
+def init_lock_columns():
+    """Add locked_by / locked_at to budget_requests if not present."""
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute("""
+                ALTER TABLE budget.budget_requests
+                    ADD COLUMN IF NOT EXISTS locked_by  VARCHAR NULL,
+                    ADD COLUMN IF NOT EXISTS locked_at  TIMESTAMP NULL
+            """)
+    except Exception:
+        pass
+
 # A case is "已審理" once the expert has acted on it (退件 / 補件 / 通過).
 # Re-ingesting changed data for such a case must NOT overwrite history —
 # it becomes a new 補送 case instead.
@@ -301,7 +316,8 @@ def dispatch_budget(budget_id):
                    SET budget_no    = COALESCE(%s, budget_no),
                        expert_name  = COALESCE(%s, expert_name),
                        dispatch_date = NOW(),
-                       status        = 'EXPERT_REVIEW'
+                       status        = 'EXPERT_REVIEW',
+                       updated_at    = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (budget_no, expert_name, budget_id),
@@ -394,6 +410,74 @@ def delete_budget(budget_id):
     return jsonify(ok=True, deleted=budget_id)
 
 
+# ── Concurrency lock ──────────────────────────────────────────────────
+@budgets_bp.post("/budgets/<int:budget_id>/lock")
+@require_auth
+def acquire_lock(budget_id):
+    """Try to acquire the 15-min edit lock for the review form."""
+    user = current_user()
+    if user.get("role") == "viewer":
+        return jsonify(error="無編輯權限"), 403
+
+    caller = user.get("name", "")
+    try:
+        with db_cursor() as cur:
+            cur.execute("""
+                SELECT locked_by, status,
+                       CASE WHEN locked_at IS NOT NULL
+                            THEN EXTRACT(EPOCH FROM (NOW() - locked_at))::int
+                            ELSE NULL END AS lock_age_sec
+                FROM budget.budget_requests WHERE id = %s
+            """, (budget_id,))
+            row = cur.fetchone()
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    if not row:
+        return jsonify(error="案件不存在"), 404
+    r = row_to_dict(row)
+
+    if r["status"] in COMPLETED_STATUSES:
+        return jsonify(ok=False, reason="案件已結案")
+
+    age       = r.get("lock_age_sec")          # seconds since lock was set
+    holder    = (r.get("locked_by") or "").strip()
+    expired   = (age is None) or (age > LOCK_TTL)
+
+    if holder and holder != caller and not expired:
+        return jsonify(ok=False, locked_by=holder,
+                       expires_in=int(LOCK_TTL - age))
+
+    # acquire / renew
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                "UPDATE budget.budget_requests SET locked_by=%s, locked_at=NOW() WHERE id=%s",
+                (caller, budget_id),
+            )
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    return jsonify(ok=True)
+
+
+@budgets_bp.delete("/budgets/<int:budget_id>/lock")
+@require_auth
+def release_lock(budget_id):
+    """Release the edit lock (only if held by the caller)."""
+    caller = current_user().get("name", "")
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute("""
+                UPDATE budget.budget_requests
+                   SET locked_by = NULL, locked_at = NULL
+                 WHERE id = %s AND locked_by = %s
+            """, (budget_id, caller))
+    except Exception:
+        pass
+    return jsonify(ok=True)
+
+
 # ── Expert review (save comment + recommendation, no finalise) ───────
 @budgets_bp.post("/budgets/<int:budget_id>/review")
 @require_auth
@@ -418,20 +502,30 @@ def review_budget(budget_id):
             return jsonify(error="案件不存在"), 404
         before = row_to_dict(before_row)
 
-    # ── Expert write lock ─────────────────────────────────────────────
-    # If a specific expert is assigned, only that expert (or admin) may write.
-        assigned = (before.get("expert_name") or "").strip()
-        caller   = (user.get("name") or "").strip()
-        role     = user.get("role", "viewer")
-        if assigned and role not in ("admin",) and caller != assigned:
-            return jsonify(
-                error=f"此案件已指派給「{assigned}」，僅該專家或系統管理員可填寫評論。"
-            ), 403
+    # ── Concurrency lock check ────────────────────────────────────────
+    # Reject if another user holds the edit lock and it hasn't expired.
+        caller  = (user.get("name") or "").strip()
+        role    = user.get("role", "viewer")
+        holder  = (before.get("locked_by") or "").strip()
+        age_row = None
+        if holder and holder != caller and role not in ("admin",):
+            with db_cursor() as cur:
+                cur.execute("""
+                    SELECT EXTRACT(EPOCH FROM (NOW() - locked_at))::int AS age
+                    FROM budget.budget_requests WHERE id = %s
+                """, (budget_id,))
+                age_row = cur.fetchone()
+            age = row_to_dict(age_row).get("age") if age_row else None
+            if age is not None and age <= LOCK_TTL:
+                return jsonify(
+                    error=f"案件正在被「{holder}」編輯中，請稍後再試。"
+                ), 423
 
         with db_cursor(commit=True) as cur:
             cur.execute(
                 """UPDATE budget.budget_requests
-                   SET expert_comment = %s, expert_decision = %s
+                   SET expert_comment = %s, expert_decision = %s,
+                       locked_by = NULL, locked_at = NULL, updated_at = NOW()
                    WHERE id = %s RETURNING *""",
                 (comment, decision, budget_id),
             )
@@ -477,7 +571,10 @@ def approve_budget(budget_id):
                            THEN EXTRACT(DAY FROM (NOW() - dispatch_date))::INT
                            ELSE NULL
                        END,
-                       status          = 'CLOSED'
+                       status          = 'CLOSED',
+                       locked_by       = NULL,
+                       locked_at       = NULL,
+                       updated_at      = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (comment, budget_id),
@@ -519,7 +616,10 @@ def reject_budget(budget_id):
                    SET expert_decision = '退件',
                        expert_comment  = COALESCE(NULLIF(%s, ''), expert_comment),
                        sign_date       = CASE WHEN %s THEN NOW() ELSE sign_date END,
-                       status          = %s
+                       status          = %s,
+                       locked_by       = NULL,
+                       locked_at       = NULL,
+                       updated_at      = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (comment, final, new_status, budget_id),
@@ -537,6 +637,91 @@ def reject_budget(budget_id):
         _notify_roles(["admin", "viewer"],
             f"⚠ 案件「{before['project_name']}」(#{budget_id}) 退回補件，等待申請人補充資料。")
     return jsonify(budget=after)
+
+
+# ── Batch sign (atomic) ──────────────────────────────────────────────
+@budgets_bp.post("/budgets/batch-sign")
+@require_auth
+def batch_sign():
+    """Sign off multiple cases in ONE transaction (all-or-nothing).
+
+    Each case is approved if the expert recommended 通過, or finally
+    rejected if the expert recommended 退件. If any single case fails
+    validation, the whole batch rolls back and nothing is signed."""
+    user = current_user()
+    if user.get("role") not in ("admin", "boss"):
+        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+
+    ids = (request.json or {}).get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify(error="未提供要簽核的案件"), 400
+    ids = [int(i) for i in ids]
+
+    results = []   # (budget_id, before, after, action) — for audit/notify after commit
+    try:
+        # Single transaction: any raise inside → full rollback
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                "SELECT * FROM budget.budget_requests WHERE id = ANY(%s) FOR UPDATE",
+                (ids,),
+            )
+            rows = {r["id"]: row_to_dict(r) for r in cur.fetchall()}
+
+            missing = [i for i in ids if i not in rows]
+            if missing:
+                raise ValueError(f"案件不存在：{missing}")
+
+            bad = [i for i in ids if rows[i]["status"] != "EXPERT_REVIEW"]
+            if bad:
+                raise ValueError(f"案件狀態非專家審核中，無法簽核：{bad}")
+
+            for i in ids:
+                before = rows[i]
+                if before.get("expert_decision") == "退件":
+                    cur.execute(
+                        """UPDATE budget.budget_requests
+                           SET expert_decision = '退件', sign_date = NOW(),
+                               status = 'REJECTED',
+                               locked_by = NULL, locked_at = NULL, updated_at = NOW()
+                           WHERE id = %s RETURNING *""",
+                        (i,),
+                    )
+                    action = "REJECT_FINAL"
+                else:
+                    cur.execute(
+                        """UPDATE budget.budget_requests
+                           SET expert_decision = '通過', sign_date = NOW(),
+                               cycle_time = CASE
+                                   WHEN dispatch_date IS NOT NULL
+                                   THEN EXTRACT(DAY FROM (NOW() - dispatch_date))::INT
+                                   ELSE NULL END,
+                               status = 'CLOSED',
+                               locked_by = NULL, locked_at = NULL, updated_at = NOW()
+                           WHERE id = %s RETURNING *""",
+                        (i,),
+                    )
+                    action = "APPROVE"
+                results.append((i, before, row_to_dict(cur.fetchone()), action))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    # Post-commit side effects (non-fatal)
+    operator = user.get("name", "system")
+    for budget_id, before, after, action in results:
+        try:
+            audit_log(budget_id, action, operator, before, after)
+            if action == "APPROVE":
+                _notify_roles(["admin", "viewer"],
+                    f"✅ 案件「{before['project_name']}」(#{budget_id}) 已核准通過，由 {operator} 簽核。")
+            else:
+                _notify_roles(["admin", "viewer"],
+                    f"❌ 案件「{before['project_name']}」(#{budget_id}) 已退件，由 {operator} 審核。")
+        except Exception:
+            pass
+
+    return jsonify(ok=True, signed=len(results))
 
 
 # ── Resubmit ──────────────────────────────────────────────────────────
@@ -560,7 +745,8 @@ def resubmit_budget(budget_id):
                 """UPDATE budget.budget_requests
                    SET status          = 'EXPERT_REVIEW',
                        expert_decision = NULL,
-                       expert_comment  = NULL
+                       expert_comment  = NULL,
+                       updated_at      = NOW()
                    WHERE id = %s
                    RETURNING *""",
                 (budget_id,),

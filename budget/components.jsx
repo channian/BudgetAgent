@@ -106,6 +106,11 @@ const Icon = {
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>,
+
+  Activity: ({ s = 16 }) =>
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
     </svg>
 
 };
@@ -197,11 +202,12 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
   };
 
   const allItems = [
-    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,  count: pendingCount, dot: true,  roles: ["admin","boss","expert","viewer"] },
-    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                        roles: ["admin","boss","expert","viewer"] },
-    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                         roles: ["admin","boss","expert","viewer"] },
-    { id: "assignment",  label: "派發中心人員設定",  icon: <Icon.Users />,                        roles: ["admin"] },
-    { id: "permissions", label: "權限管理中心",      icon: <Icon.Shield />,                       roles: ["admin"] },
+    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,    count: pendingCount, dot: true,  roles: ["admin","boss","expert","viewer"] },
+    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                          roles: ["admin","boss","expert","viewer"] },
+    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                           roles: ["admin","boss","expert","viewer"] },
+    { id: "assignment",  label: "派發中心人員設定",  icon: <Icon.Users />,                          roles: ["admin"] },
+    { id: "permissions", label: "權限管理中心",      icon: <Icon.Shield />,                         roles: ["admin"] },
+    { id: "activity",    label: "使用狀況",          icon: <Icon.Activity />,                       roles: ["admin"] },
   ];
 
   const items = allItems.filter(it => it.roles.includes(role));
