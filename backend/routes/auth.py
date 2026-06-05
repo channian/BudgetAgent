@@ -1,8 +1,10 @@
 from functools import wraps
+import logging
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 from db import cursor as db_cursor, row_to_dict
 
+logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__)
 
 
@@ -97,11 +99,18 @@ def login():
     user = row_to_dict(row)
 
     # ── Step 2: try Windows AD (NTLM) authentication ─────────────────
+    ad_error = None
     try:
         from utils.ldap_auth import ad_authenticate
         ad_info = ad_authenticate(empno, password)
-    except Exception:
+    except ImportError as e:
         ad_info = None
+        ad_error = f"ldap3 套件未安裝：{e}"
+        logger.warning("AD login skipped — ldap3 not installed: %s", e)
+    except Exception as e:
+        ad_info = None
+        ad_error = str(e)
+        logger.warning("AD login exception for %s: %s", empno, e)
 
     if ad_info:
         # AD succeeded → sync latest name / email from HR DB
@@ -129,7 +138,10 @@ def login():
     # ── Step 3: AD not configured / unreachable → local hash fallback ─
     stored_hash = user.get("password") or ""
     if not stored_hash:
-        return jsonify(error="AD 服務不可用，且此帳號尚未設定備用密碼，請聯繫系統管理員"), 401
+        # Include the real AD failure reason so user/admin can diagnose
+        detail = f"（原因：{ad_error}）" if ad_error else "（AD 伺服器無法連線或拒絕）"
+        logger.warning("Login blocked — AD failed and no local password for %s. %s", empno, detail)
+        return jsonify(error=f"AD 驗證失敗，且此帳號尚未設定備用密碼。{detail}"), 401
 
     if not check_password_hash(stored_hash, password):
         return jsonify(error="密碼錯誤"), 401
@@ -264,3 +276,66 @@ def login_stats():
         daily=daily,
     )
 
+
+@auth_bp.get("/test-ad")
+def test_ad():
+    """
+    AD 連線診斷端點（任何人可呼叫，不需登入）。
+    用法：瀏覽器開 http://<server>:5000/api/test-ad
+    回傳每個步驟是否成功，以及失敗的精確原因。
+    """
+    result = {}
+
+    # Step 1: ldap3 installed?
+    try:
+        import ldap3
+        result["ldap3_installed"] = True
+        result["ldap3_version"] = ldap3.__version__
+    except ImportError as e:
+        result["ldap3_installed"] = False
+        result["ldap3_error"] = str(e)
+        return jsonify(result), 200
+
+    # Step 2: config loaded?
+    try:
+        from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
+        result["ldap_server"] = LDAP_SERVER
+        result["ldap_domain"] = LDAP_DOMAIN
+        result["ldap_base_dn"] = LDAP_BASE_DN
+        result["ldap_server_set"] = bool(LDAP_SERVER)
+    except Exception as e:
+        result["config_error"] = str(e)
+        return jsonify(result), 200
+
+    if not LDAP_SERVER:
+        result["verdict"] = "❌ LDAP_SERVER 未設定"
+        return jsonify(result), 200
+
+    # Step 3: TCP reachable on port 389?
+    import socket
+    try:
+        sock = socket.create_connection((LDAP_SERVER, 389), timeout=3)
+        sock.close()
+        result["tcp_389_reachable"] = True
+    except Exception as e:
+        result["tcp_389_reachable"] = False
+        result["tcp_error"] = str(e)
+        result["verdict"] = f"❌ 無法連到 {LDAP_SERVER}:389 — 可能是防火牆或 server 未啟動"
+        return jsonify(result), 200
+
+    # Step 4: anonymous bind (just check server responds)
+    try:
+        from ldap3 import Server, Connection, NONE as LDAP_NONE
+        srv = Server(LDAP_SERVER, get_info=LDAP_NONE)
+        conn = Connection(srv)
+        conn.open()
+        result["ldap_open"] = True
+        conn.unbind()
+    except Exception as e:
+        result["ldap_open"] = False
+        result["ldap_open_error"] = str(e)
+        result["verdict"] = f"❌ LDAP 連線建立失敗：{e}"
+        return jsonify(result), 200
+
+    result["verdict"] = "✅ AD 伺服器可達，LDAP 連線正常。若仍無法登入，原因是 NTLM 認證被拒（帳密錯誤或帳號鎖定）。查 Flask log 確認。"
+    return jsonify(result), 200

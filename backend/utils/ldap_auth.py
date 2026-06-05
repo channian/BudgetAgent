@@ -33,7 +33,8 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
             authentication=NTLM,
         )
         if not conn.bind():
-            logger.info("AD bind rejected for %s", username)
+            logger.warning("AD bind rejected for %s — check domain/password (result: %s)",
+                           username, conn.result)
             return None
 
         conn.search(
