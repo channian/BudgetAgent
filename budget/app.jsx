@@ -130,12 +130,14 @@ function App() {
 
   // Badge counts
   const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
+  // 待簽核 = only dispatched cases with expert comment ready for boss/admin
   const pendingCount = budgets.filter(b =>
-    b.status === "AI_REVIEW" ||
-    ((b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && hasComment(b))
+    (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && hasComment(b)
   ).length;
+  // 待專家審核 = AI_REVIEW (pending dispatch) + dispatched but no comment yet
   const expertReviewCount = budgets.filter(b =>
-    (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && !hasComment(b)
+    b.status === "AI_REVIEW" ||
+    ((b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && !hasComment(b))
   ).length;
 
   const openDetail = (b, source) => {

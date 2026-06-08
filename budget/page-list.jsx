@@ -370,7 +370,9 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   };
 
   // KPI counts
-  const allDisplay  = isCompleted ? completedView : isPending ? [...aiReviewView, ...readyToSignView] : awaitingExpertView;
+  const allDisplay  = isCompleted ? completedView
+                    : isPending   ? readyToSignView
+                    : /* expert */ [...aiReviewView, ...awaitingExpertView];
   const totalAmt    = allDisplay.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const aiApprovedCnt = allDisplay.filter((b) => b.aiResult === "approve").length;
   const overSLA     = allDisplay.filter((b) => {
@@ -382,9 +384,9 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const pageTitle = isPending ? "待簽核案件" : isExpertReview ? "待專家審核案件" : "已簽核完成案件";
   const pageLede  = isPending
-    ? "AI 初審完成後在此查看與處理；派發後等待專家評論，評論完成後簽核結案"
+    ? "專家評論完成後進入待簽核，由 boss / 系統管理員簽核結案"
     : isExpertReview
-    ? "已派發、等待專家填寫評論；填寫完成後案件自動進入待簽核佇列"
+    ? "AI 初審完成的案件在此等待派發與專家評論；派發後專家在下方填寫審核意見"
     : "已完成完整審核流程之預算案件，可匯出稽核紀錄";
 
   return (
@@ -415,8 +417,9 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <div className="lbl">{isCompleted ? "近 30 日已核可" : isPending ? "待處理案件" : "待審核案件"}</div>
           <div className="val tnum">{allDisplay.length}<small>件</small></div>
           <div className="delta up">
-            {isPending ? `待派發 ${aiReviewView.length} · 待簽核 ${readyToSignView.length}` :
-             isExpertReview ? `待評論 ${awaitingExpertView.length}` : "已結案"}
+            {isPending      ? `共 ${readyToSignView.length} 件待簽核` :
+             isExpertReview ? `待派發 ${aiReviewView.length} · 待評論 ${awaitingExpertView.length}` :
+             "已結案"}
           </div>
         </div>
         <div className="kpi k-purple">
@@ -460,38 +463,10 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         )}
       </div>
 
-      {/* ── 待簽核 main page ── */}
+      {/* ── 待簽核 main page — only cases ready for boss/admin to sign ── */}
       {isPending && (
         <>
-          {/* AI_REVIEW block — admin fills budget_no here */}
-          {aiReviewView.length > 0 && (
-            <>
-              <div className="block-head">
-                <h3>待派發案件 <span className="block-tag">AI 初審完成，請填入預算單號後至派發中心派發</span></h3>
-                <span className="hint">{aiReviewView.length} 件</span>
-              </div>
-              <div className="table-wrap">
-                <BudgetTable
-                  cols={AI_REVIEW_COLS}
-                  rows={aiReviewView}
-                  onRow={onRow}
-                  sort={sort} toggleSort={toggleSort} arr={arr}
-                  startColResize={(idx, e) => {
-                    // use local resize for AI_REVIEW_COLS
-                    e.preventDefault(); e.stopPropagation();
-                  }}
-                  setCols={() => {}}
-                  onBudgetNoSaved={(dbId, val) => {
-                    setBudgetNoOverrides(prev => ({ ...prev, [dbId]: val }));
-                    Toast.show(`✅ 預算單號已儲存`, "ok");
-                  }}
-                />
-              </div>
-            </>
-          )}
-
-          {/* Ready-to-sign block */}
-          <div className="block-head" style={{ marginTop: aiReviewView.length > 0 ? 22 : 0 }}>
+          <div className="block-head">
             <h3>待簽核 <span className="block-tag">專家評論完成，待 boss / 管理員簽核</span></h3>
             <span className="hint">{readyToSignView.length} 件</span>
           </div>
@@ -512,21 +487,52 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         </>
       )}
 
-      {/* ── 待專家審核 page ── */}
+      {/* ── 待專家審核 page: two blocks ── */}
       {isExpertReview && (
-        <div className="table-wrap">
-          {awaitingExpertView.length === 0 ? (
-            <div className="empty">🎉 目前沒有待審核案件</div>
-          ) : (
-            <BudgetTable
-              cols={EXPERT_COLS}
-              rows={awaitingExpertView}
-              onRow={onRow}
-              sort={sort} toggleSort={toggleSort} arr={arr}
-              startColResize={startColResize} setCols={setCols}
-            />
-          )}
-        </div>
+        <>
+          {/* Block 1: AI_REVIEW — same data as 派發中心; admin fills budget_no here */}
+          <div className="block-head">
+            <h3>待派發案件 <span className="block-tag">AI 初審完成，同步顯示於派發中心；可在此填入預算單號</span></h3>
+            <span className="hint">{aiReviewView.length} 件</span>
+          </div>
+          <div className="table-wrap">
+            {aiReviewView.length === 0 ? (
+              <div className="empty">目前沒有待派發案件</div>
+            ) : (
+              <BudgetTable
+                cols={AI_REVIEW_COLS}
+                rows={aiReviewView}
+                onRow={onRow}
+                sort={sort} toggleSort={toggleSort} arr={arr}
+                startColResize={(_, e) => { e.preventDefault(); e.stopPropagation(); }}
+                setCols={() => {}}
+                onBudgetNoSaved={(dbId, val) => {
+                  setBudgetNoOverrides(prev => ({ ...prev, [dbId]: val }));
+                  Toast.show("✅ 預算單號已儲存", "ok");
+                }}
+              />
+            )}
+          </div>
+
+          {/* Block 2: dispatched cases waiting for expert comment */}
+          <div className="block-head" style={{ marginTop: 22 }}>
+            <h3>待專家審核 <span className="block-tag">已派發，等待專家填寫評論</span></h3>
+            <span className="hint">{awaitingExpertView.length} 件</span>
+          </div>
+          <div className="table-wrap">
+            {awaitingExpertView.length === 0 ? (
+              <div className="empty">🎉 目前沒有待審核案件</div>
+            ) : (
+              <BudgetTable
+                cols={EXPERT_COLS}
+                rows={awaitingExpertView}
+                onRow={onRow}
+                sort={sort} toggleSort={toggleSort} arr={arr}
+                startColResize={startColResize} setCols={setCols}
+              />
+            )}
+          </div>
+        </>
       )}
 
       {/* ── 已簽核完成 page ── */}
