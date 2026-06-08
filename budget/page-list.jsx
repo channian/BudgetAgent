@@ -920,7 +920,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
                   )}
                 </div>
               </div>
-              <div className="table-wrap" style={{ flex: 1, overflowY: "auto", maxHeight: 580 }}>
+              <div className="table-wrap">
                 {completedView.length === 0 ? (
                   <div className="empty">查無符合條件之案件</div>
                 ) : (
