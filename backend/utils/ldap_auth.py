@@ -13,18 +13,18 @@ logger = logging.getLogger(__name__)
 
 def ad_authenticate(username: str, password: str) -> Optional[dict]:
     """
-    Attempt to bind to AD as the user. Tries, in order:
-      1. NTLM with session sealing (ENCRYPT) over 389  — satisfies "require signing" DCs
-      2. plain NTLM over 389                            — classic, works on relaxed DCs
-      3. NTLM over LDAPS (636)                          — when 389 is locked down
+    Attempt to bind to AD as the user. Tries in order:
+      1. SIMPLE UPN over LDAPS (user@fqdn) — works on DCs that require signing/channel-binding
+      2. NTLM sealed/389  — satisfies "require signing" DCs via sealing
+      3. NTLM plain/389   — classic, works on relaxed DCs
+      4. NTLM LDAPS/636   — when port 389 is locked down
 
     The first strategy that binds wins. Every attempt prints its exact
-    `conn.result` to stdout so the real rejection reason is always visible in
-    the Flask console.
+    `conn.result` to stdout for diagnosis in the Flask console.
     """
     try:
         from ldap3 import (Server, Connection, Tls,
-                           NTLM, SUBTREE, ENCRYPT, NONE as LDAP_NONE)
+                           NTLM, SIMPLE, SUBTREE, ENCRYPT, NONE as LDAP_NONE)
         from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
     except ImportError as e:
         logger.debug("ldap3 / config not available: %s", e)
@@ -36,27 +36,38 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
         return None
 
     import ssl
-    user_nt = f"{LDAP_DOMAIN}\\{username}"
-    tls     = Tls(validate=ssl.CERT_NONE)
+    # Derive FQDN from base DN: DC=ase,DC=com,DC=tw → ase.com.tw
+    fqdn = ".".join(p.split("=")[1] for p in LDAP_BASE_DN.split(",") if p.upper().startswith("DC="))
+    user_nt  = f"{LDAP_DOMAIN}\\{username}"
+    user_upn = f"{username}@{fqdn}"          # e.g. K20076@ase.com.tw
+    tls      = Tls(validate=ssl.CERT_NONE)
 
     strategies = [
+        # UPN simple bind over LDAPS — most compatible with modern DCs that require signing
+        ("SIMPLE UPN/LDAPS", dict(
+            server=Server(LDAP_SERVER, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
+            user=user_upn, authentication=SIMPLE)),
+        # NTLM with sealing — satisfies "require signing" DCs
         ("NTLM sealed/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
-            authentication=NTLM, session_security=ENCRYPT)),
+            user=user_nt, authentication=NTLM, session_security=ENCRYPT)),
+        # Plain NTLM
         ("NTLM plain/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
-            authentication=NTLM)),
+            user=user_nt, authentication=NTLM)),
+        # NTLM over LDAPS
         ("NTLM LDAPS/636", dict(
             server=Server(LDAP_SERVER, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
-            authentication=NTLM)),
+            user=user_nt, authentication=NTLM)),
     ]
 
-    print(f"[AD] start auth for {user_nt}  server={LDAP_SERVER}", flush=True)
+    print(f"[AD] start auth  user_nt={user_nt}  upn={user_upn}  server={LDAP_SERVER}", flush=True)
     last_result = None
     for label, kw in strategies:
-        server = kw.pop("server")
+        srv  = kw.pop("server")
+        bind_user = kw.pop("user")   # each strategy carries its own user format
         try:
-            conn = Connection(server, user=user_nt, password=password, **kw)
+            conn = Connection(srv, user=bind_user, password=password, **kw)
             ok   = conn.bind()
             print(f"[AD] {label}: bind_ok={ok}  result={conn.result}", flush=True)
             if ok:

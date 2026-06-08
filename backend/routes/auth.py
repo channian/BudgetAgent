@@ -357,45 +357,52 @@ def test_ad_login():
 
     try:
         from ldap3 import (Server, Connection, Tls,
-                           NTLM, ENCRYPT, NONE as LDAP_NONE)
+                           NTLM, SIMPLE, ENCRYPT, NONE as LDAP_NONE)
         from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
     except ImportError as e:
         return jsonify(error=f"ldap3 not installed: {e}"), 500
 
     import ssl
-    user_nt = f"{LDAP_DOMAIN}\\{empno}"
-    tls     = Tls(validate=ssl.CERT_NONE)
+    fqdn     = ".".join(p.split("=")[1] for p in LDAP_BASE_DN.split(",") if p.upper().startswith("DC="))
+    user_nt  = f"{LDAP_DOMAIN}\\{empno}"
+    user_upn = f"{empno}@{fqdn}"
+    tls      = Tls(validate=ssl.CERT_NONE)
 
-    result = {"server": LDAP_SERVER, "domain": LDAP_DOMAIN,
-              "user_dn": user_nt, "base_dn": LDAP_BASE_DN, "attempts": []}
+    result = {"server": LDAP_SERVER, "domain": LDAP_DOMAIN, "fqdn": fqdn,
+              "user_nt": user_nt, "user_upn": user_upn,
+              "base_dn": LDAP_BASE_DN, "attempts": []}
 
     if not LDAP_SERVER:
         result["verdict"] = "❌ LDAP_SERVER 未設定"
         return jsonify(result), 200
 
     strategies = [
+        ("SIMPLE UPN/LDAPS", dict(
+            server=Server(LDAP_SERVER, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
+            user=user_upn, authentication=SIMPLE)),
         ("NTLM sealed/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
-            authentication=NTLM, session_security=ENCRYPT)),
+            user=user_nt, authentication=NTLM, session_security=ENCRYPT)),
         ("NTLM plain/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
-            authentication=NTLM)),
+            user=user_nt, authentication=NTLM)),
         ("NTLM LDAPS/636", dict(
             server=Server(LDAP_SERVER, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
-            authentication=NTLM)),
+            user=user_nt, authentication=NTLM)),
     ]
 
     for label, kw in strategies:
-        server = kw.pop("server")
-        attempt = {"strategy": label}
+        srv       = kw.pop("server")
+        bind_user = kw.pop("user")
+        attempt   = {"strategy": label, "bind_user": bind_user}
         try:
-            conn = Connection(server, user=user_nt, password=password, **kw)
+            conn = Connection(srv, user=bind_user, password=password, **kw)
             ok = conn.bind()
             attempt["bind_ok"] = ok
             attempt["result"]  = str(conn.result)
             result["attempts"].append(attempt)
             if ok:
-                result["verdict"] = f"✅ NTLM bind 成功（策略：{label}）— AD 認證正常運作"
+                result["verdict"] = f"✅ bind 成功（策略：{label}）— AD 認證正常運作"
                 conn.unbind()
                 return jsonify(result), 200
         except Exception as e:

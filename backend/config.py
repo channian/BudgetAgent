@@ -17,7 +17,7 @@ HR_DB = {
     "options": "-c search_path=base",
 }
 
-SECRET_KEY = "pensieve-internal-2026"
+SECRET_KEY = "budget-ai-internal-2026"
 
 # ── Active Directory (LDAP) ───────────────────────────────────────────
 # Service account used only for read-only email lookups (not for user login).

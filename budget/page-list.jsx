@@ -467,7 +467,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       {isPending && (
         <>
           <div className="block-head">
-            <h3>待簽核 <span className="block-tag">專家評論完成，待 boss / 管理員簽核</span></h3>
+            <h3>待簽核 <span className="block-tag">專家評論完成，待簽核</span></h3>
             <span className="hint">{readyToSignView.length} 件</span>
           </div>
           <div className="table-wrap">
