@@ -26,7 +26,7 @@ RPA 手動補入腳本（備援用，非主流程）
   • 案件已審理，AI 資料有變       → 建立補送案件「X（補送）」
 """
 
-import os, json, hashlib, datetime
+import os, json, hashlib, datetime, difflib, re
 import psycopg2, psycopg2.extras
 
 INPUT_FILE = r"D:\AS\2026\預算AI Agent\新思路0409\系統flask\A1初步預算\budget.json"
@@ -40,7 +40,8 @@ DB_CONFIG = {
     "options":  "-c search_path=budget",
 }
 
-DECIDED_STATUSES = ("CLOSED", "REJECTED", "PENDING_ACTION")
+DECIDED_STATUSES      = ("CLOSED", "REJECTED", "PENDING_ACTION")
+FUZZY_MATCH_THRESHOLD = 0.82   # difflib ratio; 0.78-0.90 建議範圍
 
 
 def _rpa_signature(category, sub_category, expert_name, ai_comment, ai_result_dict):
@@ -76,6 +77,51 @@ def _row_signature(row):
         ai_str,
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+
+
+def _norm_name(s):
+    s = (s or "").strip()
+    s = re.sub(r"[\s\-_—–（）()【】\[\]、，,。./\\：:]+", "", s)
+    return s.lower()
+
+
+def _find_project(cur, incoming_name):
+    """Return (canonical_db_name, rows) using exact → normalised → difflib fallback."""
+    def _fetch_rows(name):
+        esc = name.replace("%", r"\%").replace("_", r"\_")
+        cur.execute(
+            "SELECT * FROM budget.budget_requests "
+            "WHERE project_name = %s OR project_name LIKE %s "
+            "ORDER BY id DESC",
+            (name, esc + "（補送%"),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    rows = _fetch_rows(incoming_name)
+    if rows:
+        return incoming_name, rows
+
+    cur.execute("SELECT DISTINCT project_name FROM budget.budget_requests")
+    all_names = [r["project_name"] for r in cur.fetchall()]
+    if not all_names:
+        return None, []
+
+    norm_in = _norm_name(incoming_name)
+    for name in all_names:
+        if _norm_name(name) == norm_in:
+            rows = _fetch_rows(name)
+            if rows:
+                return name, rows
+
+    close = difflib.get_close_matches(
+        incoming_name, all_names, n=1, cutoff=FUZZY_MATCH_THRESHOLD
+    )
+    if close:
+        rows = _fetch_rows(close[0])
+        if rows:
+            return close[0], rows
+
+    return None, []
 
 
 def _next_supplement_name(cur, base):
@@ -134,14 +180,9 @@ def batch_process():
 
         try:
             # ── Fetch existing case + all 補送 versions ──────────────
-            escaped = project.replace("%", r"\%").replace("_", r"\_")
-            cur.execute(
-                "SELECT * FROM budget.budget_requests "
-                "WHERE project_name = %s OR project_name LIKE %s "
-                "ORDER BY id DESC",
-                (project, escaped + "（補送%"),
-            )
-            existing = [dict(r) for r in cur.fetchall()]
+            canonical, existing = _find_project(cur, project)
+            if canonical and canonical != project:
+                print(f"   🔀 模糊匹配：「{project}」→「{canonical}」")
 
             # ── 1) Identical AI data → ignore ─────────────────────────
             if any(_row_signature(ex) == incoming_sig for ex in existing):
@@ -163,14 +204,15 @@ def batch_process():
                 )
                 conn.commit()
                 budget_id = cur.fetchone()["id"]
-                print(f"🔄  updated id={budget_id}  {project}")
+                print(f"🔄  updated id={budget_id}  {canonical or project}")
                 ok += 1
                 continue
 
             # ── 3) Already decided → create 補送 case ────────────────
             if latest and latest["status"] in DECIDED_STATUSES:
-                insert_name = _next_supplement_name(cur, project)
-                note = f"補送：原案件「{project}」(#{latest['id']}) 經審理後重新送件。"
+                base_name   = canonical or project
+                insert_name = _next_supplement_name(cur, base_name)
+                note = f"補送：原案件「{base_name}」(#{latest['id']}) 經審理後重新送件。"
                 action = "補送"
             else:
                 insert_name = project
