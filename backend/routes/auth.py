@@ -100,22 +100,20 @@ def login():
 
     # ── Step 2: try Windows AD (NTLM) authentication ─────────────────
     ad_error = None
-    print(f"[LOGIN] empno={empno!r}  starting AD auth", flush=True)
+    logger.warning("[LOGIN] empno=%r  starting AD auth", empno)
     try:
         from utils.ldap_auth import ad_authenticate
-        print(f"[LOGIN] ad_authenticate imported OK, calling now…", flush=True)
+        logger.warning("[LOGIN] ad_authenticate imported OK, calling now…")
         ad_info = ad_authenticate(empno, password)
-        print(f"[LOGIN] ad_authenticate returned: {ad_info is not None}", flush=True)
+        logger.warning("[LOGIN] ad_authenticate returned success=%s", ad_info is not None)
     except ImportError as e:
         ad_info = None
         ad_error = f"ldap3 套件未安裝：{e}"
-        print(f"[LOGIN] ImportError: {e}", flush=True)
-        logger.warning("AD login skipped — ldap3 not installed: %s", e)
+        logger.warning("[LOGIN] ImportError (ldap3 missing): %s", e)
     except Exception as e:
         ad_info = None
         ad_error = str(e)
-        print(f"[LOGIN] Exception during AD auth: {type(e).__name__}: {e}", flush=True)
-        logger.warning("AD login exception for %s: %s", empno, e)
+        logger.warning("[LOGIN] Exception during AD auth: %s: %s", type(e).__name__, e)
 
     if ad_info:
         # AD succeeded → sync latest name / email from HR DB

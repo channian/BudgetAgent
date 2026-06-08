@@ -27,12 +27,11 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
                            NTLM, SIMPLE, SUBTREE, ENCRYPT, NONE as LDAP_NONE)
         from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
     except ImportError as e:
-        logger.debug("ldap3 / config not available: %s", e)
-        print(f"[AD] import failed: {e}", flush=True)
+        logger.warning("[AD] import failed (ldap3 not installed?): %s", e)
         return None
 
     if not LDAP_SERVER:
-        print("[AD] LDAP_SERVER is empty in config.py", flush=True)
+        logger.warning("[AD] LDAP_SERVER is empty in config.py")
         return None
 
     import ssl
@@ -61,7 +60,7 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
             user=user_nt, authentication=NTLM)),
     ]
 
-    print(f"[AD] start auth  user_nt={user_nt}  upn={user_upn}  server={LDAP_SERVER}", flush=True)
+    logger.warning("[AD] start auth  user_nt=%s  upn=%s  server=%s", user_nt, user_upn, LDAP_SERVER)
     last_result = None
     for label, kw in strategies:
         srv  = kw.pop("server")
@@ -69,16 +68,15 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
         try:
             conn = Connection(srv, user=bind_user, password=password, **kw)
             ok   = conn.bind()
-            print(f"[AD] {label}: bind_ok={ok}  result={conn.result}", flush=True)
+            logger.warning("[AD] %s: bind_ok=%s  result=%s", label, ok, conn.result)
             if ok:
                 return _read_profile(conn, username, LDAP_BASE_DN, SUBTREE)
             last_result = conn.result
         except Exception as e:
-            print(f"[AD] {label}: exception {e}", flush=True)
+            logger.warning("[AD] %s: exception %s", label, e)
             last_result = str(e)
 
-    logger.warning("AD: all bind strategies failed for %s — last: %s", username, last_result)
-    print(f"[AD] all strategies failed for {user_nt} — last result: {last_result}", flush=True)
+    logger.warning("[AD] all strategies failed for %s — last result: %s", user_nt, last_result)
     return None
 
 
@@ -100,7 +98,7 @@ def _read_profile(conn, username, base_dn, subtree) -> dict:
                 "email":      str(entry.mail)        if entry.mail        else None,
             }
     except Exception as e:
-        print(f"[AD] profile search failed (bind was OK): {e}", flush=True)
+        logger.warning("[AD] profile search failed (bind was OK): %s", e)
     # Bind succeeded but search failed/empty — auth still counts as success.
     return {"username": username, "name": username, "department": None, "email": None}
 
