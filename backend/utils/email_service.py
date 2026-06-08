@@ -67,7 +67,9 @@ def send_dispatch_email(
           <td style="padding:28px 32px 8px;">
             <p style="margin:0;font-size:15px;color:#333;line-height:1.7;">
               {expert_name} 您好，<br/>
-              以下預算案件已派發給您，請登入系統完成專家複審。
+              以下預算案件已派發給您，請登入系統完成專家複審。<br/>
+              <br/>
+              系統連接：<a href="http://10.10.51.118:5000" style="color:#c0456a;text-decoration:none;font-weight:600;">10.10.51.118:5000</a>
             </p>
           </td>
         </tr>
@@ -129,7 +131,7 @@ def send_dispatch_email(
           <td style="padding:18px 32px 28px;border-top:1px solid #ecdfd6;">
             <p style="margin:0;font-size:12px;color:#aaa;line-height:1.6;">
               此信件由系統自動發送，請勿直接回覆。<br/>
-              如有疑問請聯繫系統管理員。
+              如有系統相關疑問請聯繫系統管理員 Jarven #16270。
             </p>
           </td>
         </tr>
