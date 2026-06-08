@@ -5,6 +5,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
 
   const [form, setForm] = React.useState(() => ({
     project:       budget?.project       || "",
+    budgetNo:      budget?.budgetNo      || "",
     category:      budget?.category      || "",
     subCategory:   budget?.subCategory   || "",
     expertName:    budget?.expertName    || "",
@@ -50,10 +51,9 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
 
   const dispatchDate = budget?.dispatchDate || new Date();
   const week = MOCK.weekOf(dispatchDate);
-  const budgetNo = budget?.id || MOCK.nextDispatchNo([]);
   const cyc = budget?.signDate ? MOCK.cycleTime(dispatchDate, budget.signDate) : null;
 
-  const canSave = form.project && form.category && form.owner && form.amount;
+  const canSave = form.project && form.owner && form.amount;
 
   return (
     <>
@@ -96,12 +96,13 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
               </div>
               <div className="field-row two" style={{ marginTop: 14 }}>
                 <div className="field">
-                  <label>類別 <span className="req">*</span></label>
+                  <label>預算單號 <span className="opt">(選填)</span></label>
                   <input
                     type="text"
-                    value={form.category}
-                    onChange={(e) => set("category", e.target.value)}
-                    placeholder="例：研發費用 / 資訊系統"
+                    value={form.budgetNo}
+                    onChange={(e) => set("budgetNo", e.target.value)}
+                    placeholder="例：2026-FA-00123"
+                    className="mono"
                   />
                 </div>
                 <div className="field">
@@ -110,7 +111,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                     type="text"
                     value={form.subCategory}
                     onChange={(e) => set("subCategory", e.target.value)}
-                    placeholder="例：ERP 採購系統"
+                    placeholder="例：空調 / 電力 / 水務…"
                   />
                 </div>
               </div>
@@ -130,7 +131,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                     type="text"
                     value={form.expertName}
                     onChange={(e) => set("expertName", e.target.value)}
-                    placeholder="輸入負責專家姓名（與主畫面負責專家欄位相同）"
+                    placeholder="輸入負責專家姓名"
                   />
                 </div>
               </div>
@@ -244,7 +245,6 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
           <div className="card">
             <div className="card-head"><h3>自動產生 <span className="tag">AUTO</span></h3></div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <KvLine k="預算單號" v={budgetNo} mono accent/>
               <KvLine k="週數" v={`W${String(week).padStart(2, "0")} / 2026`} mono/>
               <KvLine k="派送日期" v={MOCK.fmtDate(dispatchDate)} mono/>
               <KvLine k="簽核日期" v={budget?.signDate ? MOCK.fmtDate(budget.signDate) : "送出後系統填入"} mono/>
@@ -256,7 +256,6 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
             <div className="card-head"><h3>檢核提示 <span className="tag">CHECKS</span></h3></div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <CheckRow ok={!!form.project} label="已填寫項目名稱"/>
-              <CheckRow ok={!!form.category} label="已填寫類別"/>
               <CheckRow ok={!!form.amount && Number(form.amount) > 0} label="金額有效"/>
               <CheckRow ok={!!form.owner} label="已填寫預算負責人"/>
               <CheckRow ok={!!form.aiResult} label="AI 初審結果已套用 (選填)" warn/>
