@@ -289,6 +289,9 @@ async function apiUpdateUser(id, form) {
   const d = await apiFetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(form) });
   return d.user;
 }
+async function apiDeleteUser(id) {
+  await apiFetch(`/api/users/${id}`, { method: "DELETE" });
+}
 
 // ── Export / Import ───────────────────────────────────────────────────
 // Triggers a browser file download for the given scope + format (csv|xlsx)
@@ -401,6 +404,7 @@ window.API = {
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,
+  deleteUser:          apiDeleteUser,
   exportBudgets:       apiExportBudgets,
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,

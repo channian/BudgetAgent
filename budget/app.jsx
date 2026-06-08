@@ -227,7 +227,7 @@ function App() {
     body   = <AssignmentPage />;
     crumbs = ["派發中心人員設定"];
   } else if (route === "permissions") {
-    body   = <PermissionsPage />;
+    body   = <PermissionsPage currentUser={user} />;
     crumbs = ["權限管理中心"];
   } else if (route === "activity") {
     body   = <ActivityPage />;

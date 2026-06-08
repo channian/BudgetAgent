@@ -93,3 +93,31 @@ def update_user(user_id):
     return jsonify(user=row_to_dict(row))
 
 
+# ── Delete user (admin only) ──────────────────────────────────────────
+@users_bp.delete("/users/<int:user_id>")
+@require_auth
+def delete_user(user_id):
+    caller = current_user()
+    if caller.get("role") != "admin":
+        return jsonify(error="僅系統管理員可刪除使用者"), 403
+    if caller.get("id") == user_id:
+        return jsonify(error="無法刪除自己的帳號"), 400
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT role FROM budget.users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+        if not row:
+            return jsonify(error="使用者不存在"), 404
+        if row_to_dict(row)["role"] == "admin":
+            with db_cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM budget.users WHERE role = 'admin'")
+                if cur.fetchone()["n"] <= 1:
+                    return jsonify(error="無法刪除最後一位系統管理員"), 400
+        with db_cursor(commit=True) as cur:
+            cur.execute("DELETE FROM budget.users WHERE id = %s", (user_id,))
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    return jsonify(ok=True)
+

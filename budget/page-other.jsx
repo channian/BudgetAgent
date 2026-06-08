@@ -563,7 +563,7 @@ const ROLE_COLORS = { admin: "var(--bad)", expert: "var(--accent)", viewer: "var
 
 const EMPTY_FORM = { name: "", ad_account: "", department: "", email: "", role: "viewer" };
 
-function PermissionsPage() {
+function PermissionsPage({ currentUser }) {
   const [users,   setUsers]   = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [err,     setErr]     = React.useState("");
@@ -573,6 +573,7 @@ function PermissionsPage() {
   const [form,    setForm]    = React.useState(EMPTY_FORM);
   const [saving,  setSaving]  = React.useState(false);
   const [saveErr, setSaveErr] = React.useState("");
+  const [deleting, setDeleting] = React.useState(null); // id being deleted
 
   const load = () => {
     setLoading(true);
@@ -604,6 +605,19 @@ function PermissionsPage() {
       setSaveErr(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const doDelete = async (u) => {
+    if (!confirm(`確定要刪除使用者「${u.name}」（${u.ad_account}）？此操作無法復原。`)) return;
+    setDeleting(u.id);
+    try {
+      await API.deleteUser(u.id);
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+    } catch (e) {
+      setErr("刪除失敗：" + e.message);
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -649,6 +663,16 @@ function PermissionsPage() {
               <div style={{ color: "var(--text-muted)", fontSize: 13 }}>{u.department || "—"}</div>
               <div style={{ textAlign: "right", display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <button className="btn sm" onClick={() => openEdit(u)}>編輯</button>
+                {currentUser && u.id !== currentUser.id && (
+                  <button
+                    className="btn sm"
+                    style={{ color: "var(--bad)", borderColor: "var(--bad)" }}
+                    onClick={() => doDelete(u)}
+                    disabled={deleting === u.id}
+                  >
+                    {deleting === u.id ? "刪除中…" : "刪除"}
+                  </button>
+                )}
               </div>
             </div>
           ))}
