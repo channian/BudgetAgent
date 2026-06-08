@@ -638,17 +638,23 @@ function AssignmentPage({ currentUser }) {
                       )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                      {isDone ? (
-                        <span className="badge ok" style={{ whiteSpace: "nowrap" }}>
-                          ✓ 已派發給 {info.expertName || "（未指定）"}
-                        </span>
-                      ) : (
-                        <button
-                          className="btn sm accent"
-                          onClick={() => doDispatch(b)}
-                          disabled={isBusy}
-                        >{isBusy ? "派發中…" : "派發"}</button>
-                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {isDone ? (
+                          <span className="badge ok" style={{ whiteSpace: "nowrap" }}>
+                            ✓ 已派發給 {info.expertName || "（未指定）"}
+                          </span>
+                        ) : (
+                          <button
+                            className="btn sm accent"
+                            onClick={() => doDispatch(b)}
+                            disabled={isBusy}
+                          >{isBusy ? "派發中…" : "派發"}</button>
+                        )}
+                        {isAdmin && !isDone && (
+                          <button className="btn sm ghost" style={{ color: "var(--bad)", borderColor: "var(--bad)" }}
+                            onClick={() => doDeleteCase(b)}>刪除</button>
+                        )}
+                      </div>
                       {err && <span style={{ fontSize: 10.5, color: "var(--bad)" }}>{err}</span>}
                     </div>
                   </div>
@@ -1131,9 +1137,18 @@ function ActivityPage() {
 
 // ── Data Import page ─────────────────────────────────────────────────
 function DataImportPage({ onNew, onRefresh, currentUser }) {
-  const [busy,    setBusy]    = React.useState(false);
-  const [impMsg,  setImpMsg]  = React.useState("");
+  const [busy,         setBusy]         = React.useState(false);
+  const [impMsg,       setImpMsg]       = React.useState("");
+  const [manualCases,  setManualCases]  = React.useState([]);
+  const [manualLoading,setManualLoading]= React.useState(true);
   const fileRef = React.useRef();
+
+  React.useEffect(() => {
+    API.fetchBudgets("pending")
+      .then(all => setManualCases(all.filter(b => !b.aiReason && !b.aiResult)))
+      .catch(() => {})
+      .finally(() => setManualLoading(false));
+  }, []);
 
   const doExport = async () => {
     setBusy(true);
@@ -1192,6 +1207,55 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
           <button onClick={() => setImpMsg("")} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit" }}>✕</button>
         </div>
       )}
+
+      {/* ── Staging table: manually-created budgets awaiting AI pipeline match ── */}
+      <div className="card">
+        <div className="card-head">
+          <h3>前端暫存案件 <span className="tag">AI_REVIEW</span></h3>
+          <span className="hint">
+            {manualLoading ? "載入中…" : `${manualCases.length} 件等待 AI 比對`}
+          </span>
+        </div>
+        <div className="card-body tight" style={{ maxHeight: 360, overflowY: "auto" }}>
+          {manualLoading ? (
+            <div className="empty">載入中…</div>
+          ) : manualCases.length === 0 ? (
+            <div className="empty">🎉 目前沒有等待比對的案件</div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 130px 120px 120px", gap: "0 12px",
+                            padding: "8px 14px", background: "var(--surface-2)", fontSize: 11.5,
+                            fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.04em",
+                            borderBottom: "1px solid var(--border)" }}>
+                <div>週</div><div>項目名稱</div><div>類別</div><div>金額</div><div>狀態</div>
+              </div>
+              {manualCases.map(b => (
+                <div key={b.dbId} style={{ display: "grid", gridTemplateColumns: "60px 1fr 130px 120px 120px",
+                                           gap: "0 12px", padding: "10px 14px", alignItems: "center",
+                                           borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+                  <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
+                  <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                       title={b.project}>{b.project}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{b.category || "—"}</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 12, textAlign: "right" }}>
+                    NT$ {(Number(b.amount) || 0).toLocaleString()}
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 4,
+                                   background: "#f59e0b22", color: "#f59e0b", fontWeight: 700 }}>
+                      等待AI比對
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 12,
+                      color: "var(--text-muted)", borderTop: "1px solid var(--border)", lineHeight: 1.7 }}>
+          💡 這些案件由前端手動建立，尚未有 AI 初審資料。當 AI pipeline 執行時，系統會以模糊匹配（3 層比對）自動將 AI 資料寫入對應案件，完成後將進入正常簽核流程。
+        </div>
+      </div>
 
       {/* ── Format explanation ── */}
       <div className="card">

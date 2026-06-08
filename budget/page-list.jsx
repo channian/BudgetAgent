@@ -239,6 +239,33 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const [filterCat,   setFilterCat]   = React.useState("");
   const [filterSys,   setFilterSys]   = React.useState("");
 
+  // 已簽核完成 import/export
+  const fileRef   = React.useRef();
+  const [busy,    setBusy]   = React.useState(false);
+  const [impMsg,  setImpMsg] = React.useState("");
+
+  const doExportCompleted = async () => {
+    setBusy(true);
+    try { await API.exportBudgets("completed", "csv"); }
+    catch (e) { alert("匯出失敗：" + e.message); }
+    finally { setBusy(false); }
+  };
+  const doImportCompleted = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setBusy(true); setImpMsg("");
+    try {
+      const result = await API.importBudgets(file);
+      setImpMsg(`匯入完成：新增 ${result.inserted ?? result.created ?? 0} 筆，略過 ${result.skipped ?? 0} 筆`);
+      onRefresh && onRefresh();
+    } catch (e) {
+      setImpMsg("⚠ 匯入失敗：" + e.message);
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
+  };
+
   // Persist column widths
   const storeKey = `pensieve.cols.${scope}`;
   React.useEffect(() => {
@@ -316,6 +343,19 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     return r;
   }, [applyView, budgets, filterStart, filterEnd, filterCat, filterSys]);
 
+  // Cycle time by system (for 已簽核完成 dashboard)
+  const cycleBySystem = React.useMemo(() => {
+    const map = {};
+    completedView.forEach(b => {
+      const sys = b.subCategory || "（未分類）";
+      if (!map[sys]) map[sys] = { total: 0, cnt: 0 };
+      if (b.cycleTime != null) { map[sys].total += Number(b.cycleTime); map[sys].cnt++; }
+    });
+    return Object.entries(map)
+      .map(([sys, d]) => ({ sys, avg: d.cnt ? Math.round(d.total / d.cnt * 10) / 10 : null, cnt: d.cnt }))
+      .sort((a, bv) => (bv.avg ?? -1) - (a.avg ?? -1));
+  }, [completedView]);
+
   // Batch sign
   const selectableIds = readyToSignView.map((b) => b.dbId);
   const allSelected  = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
@@ -378,6 +418,17 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <div className="lede">{pageLede}</div>
         </div>
         <div className="actions">
+          {isCompleted && (
+            <>
+              <button className="btn" onClick={doExportCompleted} disabled={busy || loading}>
+                <Icon.Download/>匯出 CSV
+              </button>
+              <button className="btn" onClick={() => fileRef.current.click()} disabled={busy || loading}>
+                <Icon.Upload/>匯入
+              </button>
+              <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImportCompleted}/>
+            </>
+          )}
           <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
         </div>
       </div>
@@ -484,6 +535,49 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       {/* ── 已簽核完成 page ── */}
       {isCompleted && (
         <>
+          {impMsg && (
+            <div style={{ padding: "8px 14px", background: impMsg.startsWith("⚠") ? "var(--bad-soft)" : "var(--ok-soft)",
+                          color: impMsg.startsWith("⚠") ? "var(--bad)" : "var(--ok)",
+                          borderRadius: "var(--radius)", fontSize: 13, marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>
+              <span>{impMsg}</span>
+              <button onClick={() => setImpMsg("")} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: "inherit" }}>✕</button>
+            </div>
+          )}
+
+          {cycleBySystem.length > 0 && (
+            <div className="card" style={{ marginBottom: 12 }}>
+              <div className="card-head">
+                <h3>各系統 Cycle Time</h3>
+                <span className="hint">平均審核天數（依目前篩選結果 {completedView.length} 件）</span>
+              </div>
+              <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {cycleBySystem.map(({ sys, avg, cnt }) => {
+                  const col = avg == null ? "var(--text-muted)" : avg <= 1 ? "#10b981" : avg <= 3 ? "#f59e0b" : "#ef4444";
+                  const pct = avg == null ? 0 : Math.min(100, (avg / 10) * 100);
+                  return (
+                    <div key={sys}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
+                        <span style={{ color: "var(--text)", fontWeight: 500 }}>{sys}</span>
+                        <span style={{ color: col, fontFamily: "monospace", fontWeight: 600 }}>
+                          {avg != null ? `${avg}d` : "—"}
+                          <span style={{ color: "var(--text-muted)", fontWeight: 400, marginLeft: 6 }}>({cnt} 件)</span>
+                        </span>
+                      </div>
+                      <div style={{ height: 8, background: "var(--surface-2)", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: col, borderRadius: 4, transition: "width 0.4s ease" }}/>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 4, display: "flex", gap: 16 }}>
+                  <span style={{ color: "#10b981" }}>● ≤ 1 天（優）</span>
+                  <span style={{ color: "#f59e0b" }}>● ≤ 3 天（達標）</span>
+                  <span style={{ color: "#ef4444" }}>● &gt; 3 天（超時）</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
             <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>簽核日期</span>
             <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
