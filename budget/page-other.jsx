@@ -1143,6 +1143,9 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
   const [manualLoading,setManualLoading]= React.useState(true);
   const fileRef = React.useRef();
 
+  // Sheet picker modal state: null | { file, sheets: [...], selected: str }
+  const [sheetModal, setSheetModal] = React.useState(null);
+
   React.useEffect(() => {
     API.fetchBudgets("pending")
       .then(all => setManualCases(all.filter(b => !b.aiReason && !b.aiResult)))
@@ -1153,7 +1156,7 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
   const doExport = async () => {
     setBusy(true);
     try {
-      await API.exportBudgets("pending", "csv");
+      await API.exportBudgets("completed", "csv");
     } catch (e) {
       alert("匯出失敗：" + e.message);
     } finally {
@@ -1161,20 +1164,47 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
     }
   };
 
-  const doImport = async (e) => {
+  // Step 1: pick file → probe for sheets
+  const onFilePicked = async (e) => {
     const file = e.target.files[0];
+    e.target.value = "";
     if (!file) return;
     setBusy(true); setImpMsg("");
     try {
-      const result = await API.importBudgets(file);
-      const msg = `匯入完成：新增 ${result.inserted ?? result.created ?? 0} 筆，略過 ${result.skipped ?? 0} 筆`;
-      setImpMsg(msg);
-      onRefresh();
-    } catch (e) {
-      setImpMsg("⚠ 匯入失敗：" + e.message);
+      const { sheets } = await API.getImportSheets(file);
+      if (sheets.length === 1) {
+        // single sheet → import immediately
+        await _runImport(file, sheets[0]);
+      } else {
+        setSheetModal({ file, sheets, selected: sheets[0] });
+      }
+    } catch (err) {
+      setImpMsg("⚠ 檔案解析失敗：" + err.message);
     } finally {
       setBusy(false);
-      e.target.value = "";
+    }
+  };
+
+  // Step 2: confirm sheet and import
+  const doImportSheet = async () => {
+    if (!sheetModal) return;
+    const { file, selected } = sheetModal;
+    setSheetModal(null);
+    setBusy(true); setImpMsg("");
+    await _runImport(file, selected);
+  };
+
+  const _runImport = async (file, sheet) => {
+    try {
+      const result = await API.importBudgets(file, { sheet, mode: "completed" });
+      const cnt = result.inserted ?? result.created ?? 0;
+      setImpMsg(`匯入完成：新增/更新 ${cnt} 筆，略過 ${result.skipped ?? 0} 筆` +
+        (result.errors?.length ? `，${result.errors.length} 列錯誤` : ""));
+      onRefresh();
+    } catch (err) {
+      setImpMsg("⚠ 匯入失敗：" + err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1190,9 +1220,9 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
             <Icon.Download/>匯出 CSV
           </button>
           <button className="btn" onClick={() => fileRef.current.click()} disabled={busy}>
-            <Icon.Upload/>匯入 CSV / Excel
+            <Icon.Upload/>匯入已簽核 Excel
           </button>
-          <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImport}/>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={onFilePicked}/>
           <button className="btn accent" onClick={onNew}>
             <Icon.Plus/>建立預算單
           </button>
@@ -1261,17 +1291,17 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
       <div className="card">
         <div className="card-head">
           <h3>匯入格式說明</h3>
-          <span className="tag">CSV / Excel</span>
+          <span className="tag">Excel / CSV — 已簽核歷史資料</span>
         </div>
         <div className="card-body">
           <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
-            匯入檔案（.csv 或 .xlsx）第一列為欄位標題，資料從第二列起。系統以「項目名稱」為唯一索引，重複項目將自動更新。
+            匯入檔案第一列為欄位標題，資料從第二列起。系統以「Project Name」為唯一索引，重複項目將自動更新。匯入後資料直接進入<b>已簽核完成</b>（CLOSED / REJECTED）。
           </p>
           <div style={{ overflowX: "auto" }}>
             <table className="dt" style={{ width: "100%", fontSize: 13 }}>
               <thead>
                 <tr>
-                  <th>欄位名稱</th>
+                  <th>欄位標題</th>
                   <th style={{ textAlign: "center" }}>必填</th>
                   <th>說明</th>
                   <th>範例</th>
@@ -1279,15 +1309,18 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
               </thead>
               <tbody>
                 {[
-                  ["案件名稱",                   "✓", "預算單的唯一識別名稱",          "2024-Q1-ERP升級計畫"],
-                  ["判定類別",                   "✓", "業務類別（設備擴充、工程擴廠…）","設備擴充 (UTI)"],
-                  ["判定系統",                   "",  "子系統或細項名稱",              "CIM相關"],
-                  ["負責專家",                   "",  "指定審核專家的姓名",             "王小明"],
-                  ["金額",                       "✓", "預算金額（純數字，不含逗號）",   "1500000"],
-                  ["原因",                       "",  "AI 初審意見說明",                "符合採購規範"],
-                  ["最終決策",                   "",  "通過 或 退件",                   "通過"],
-                  ["AI對於保留案件的信心分數",   "",  "0–100 的整數信心分數",           "85"],
-                  ["備註",                       "",  "補充說明",                       "—"],
+                  ["Project Name",  "✓", "預算案件唯一名稱",                   "2024-Q1-ERP升級計畫"],
+                  ["週數(w)",       "",  "ISO 週數，接受 W21 或 21",            "W21"],
+                  ["類別",          "",  "業務類別（設備擴充、工程擴廠…）",      "設備擴充 (UTI)"],
+                  ["BudgetNo.",     "",  "預算單號",                            "B2024-001"],
+                  ["預算負責人",    "",  "申請人 / 負責人姓名（也接受 Owner）",  "王小明"],
+                  ["金額",          "",  "預算金額（純數字或含逗號）",           "1,500,000"],
+                  ["專家評論",      "",  "專家審核意見",                         "符合採購規範"],
+                  ["審核處置",      "",  "通過 或 退件（決定最終狀態）",         "通過"],
+                  ["派送日期",      "",  "格式 YYYY-MM-DD 或 YYYY/MM/DD",       "2024-03-15"],
+                  ["簽核日期",      "",  "格式同上",                             "2024-03-18"],
+                  ["Cycle time",    "",  "天數（整數或含「天」字）",             "3"],
+                  ["備註",          "",  "補充說明",                             "—"],
                 ].map(([col, req, desc, ex]) => (
                   <tr key={col}>
                     <td><code style={{ fontSize: 12 }}>{col}</code></td>
@@ -1300,7 +1333,7 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
             </table>
           </div>
           <div style={{ marginTop: 14, padding: "10px 14px", background: "var(--surface-2)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.7 }}>
-            💡 <b>提示：</b>可先點「匯出 CSV」下載現有待簽核資料作為範本，填寫後再匯入。匯入時欄位名稱若不符合上表將略過該欄位，不影響其他欄位匯入。
+            💡 Excel 若有多個工作表，匯入時會顯示選擇視窗。「目前關卡」欄位不需要，匯入後狀態由「審核處置」自動決定（通過→CLOSED，退件→REJECTED）。
           </div>
         </div>
       </div>
@@ -1326,6 +1359,44 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
           ))}
         </div>
       </div>
+
+      {/* ── Sheet picker modal ── */}
+      {sheetModal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 300,
+                      display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && setSheetModal(null)}>
+          <div className="card" style={{ width: 380, maxWidth: "92vw", padding: 0 }}>
+            <div className="card-head" style={{ padding: "16px 20px" }}>
+              <h3>選擇工作表</h3>
+              <button className="btn ghost sm" onClick={() => setSheetModal(null)}>✕</button>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
+                此 Excel 包含多個工作表，請選擇要匯入的工作表：
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
+                {sheetModal.sheets.map(s => (
+                  <label key={s} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                                          borderRadius: "var(--radius-sm)", cursor: "pointer",
+                                          background: sheetModal.selected === s ? "var(--accent-soft)" : "var(--surface-2)",
+                                          border: `1px solid ${sheetModal.selected === s ? "var(--accent)" : "var(--border)"}` }}>
+                    <input type="radio" name="sheet" value={s} checked={sheetModal.selected === s}
+                           onChange={() => setSheetModal(m => ({ ...m, selected: s }))}
+                           style={{ accentColor: "var(--accent)" }}/>
+                    <span style={{ fontSize: 13, fontWeight: sheetModal.selected === s ? 600 : 400 }}>{s}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                <button className="btn ghost" onClick={() => setSheetModal(null)}>取消</button>
+                <button className="btn primary" onClick={doImportSheet} disabled={busy}>
+                  {busy ? "匯入中…" : "確認匯入"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

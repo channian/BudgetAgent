@@ -318,14 +318,33 @@ async function apiExportBudgets(scope = "pending", format = "csv") {
   URL.revokeObjectURL(url);
 }
 
-// Uploads a CSV/XLSX file; returns { inserted, skipped, errors }
-async function apiImportBudgets(file) {
+// Probe an xlsx/csv file for sheet names; returns { sheets: [...] }
+async function apiGetImportSheets(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${API_BASE}/api/budgets/import`, {
+  const res = await fetch(`${API_BASE}/api/budgets/import/sheets`, {
     method: "POST",
     credentials: "include",
-    body: fd,   // let the browser set multipart boundary
+    body: fd,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body; // { sheets: ["Sheet1", ...] }
+}
+
+// Uploads a CSV/XLSX file; returns { inserted, skipped, errors }
+// options: { sheet?: string, mode?: "pending"|"completed" }
+async function apiImportBudgets(file, options = {}) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const params = new URLSearchParams();
+  if (options.sheet && options.sheet !== "(單一工作表)") params.set("sheet", options.sheet);
+  if (options.mode)  params.set("mode", options.mode);
+  const qs  = params.toString();
+  const res = await fetch(`${API_BASE}/api/budgets/import${qs ? "?" + qs : ""}`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
@@ -413,6 +432,7 @@ window.API = {
   updateUser:          apiUpdateUser,
   deleteUser:          apiDeleteUser,
   exportBudgets:       apiExportBudgets,
+  getImportSheets:     apiGetImportSheets,
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,

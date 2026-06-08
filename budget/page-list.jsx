@@ -239,10 +239,11 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const [filterCat,   setFilterCat]   = React.useState("");
   const [filterSys,   setFilterSys]   = React.useState("");
 
-  // 已簽核完成 import/export
-  const fileRef   = React.useRef();
-  const [busy,    setBusy]   = React.useState(false);
-  const [impMsg,  setImpMsg] = React.useState("");
+  // 已簽核完成 import/export + sheet picker
+  const fileRef     = React.useRef();
+  const [busy,      setBusy]      = React.useState(false);
+  const [impMsg,    setImpMsg]    = React.useState("");
+  const [sheetModal,setSheetModal]= React.useState(null); // null | { file, sheets, selected }
 
   const doExportCompleted = async () => {
     setBusy(true);
@@ -250,19 +251,45 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     catch (e) { alert("匯出失敗：" + e.message); }
     finally { setBusy(false); }
   };
-  const doImportCompleted = async (e) => {
+
+  const onImportFilePicked = async (e) => {
     const file = e.target.files[0];
+    e.target.value = "";
     if (!file) return;
     setBusy(true); setImpMsg("");
     try {
-      const result = await API.importBudgets(file);
-      setImpMsg(`匯入完成：新增 ${result.inserted ?? result.created ?? 0} 筆，略過 ${result.skipped ?? 0} 筆`);
+      const { sheets } = await API.getImportSheets(file);
+      if (sheets.length === 1) {
+        await _runImport(file, sheets[0]);
+      } else {
+        setSheetModal({ file, sheets, selected: sheets[0] });
+        setBusy(false);
+      }
+    } catch (err) {
+      setImpMsg("⚠ 檔案解析失敗：" + err.message);
+      setBusy(false);
+    }
+  };
+
+  const doImportSheet = async () => {
+    if (!sheetModal) return;
+    const { file, selected } = sheetModal;
+    setSheetModal(null);
+    setBusy(true); setImpMsg("");
+    await _runImport(file, selected);
+  };
+
+  const _runImport = async (file, sheet) => {
+    try {
+      const result = await API.importBudgets(file, { sheet, mode: "completed" });
+      const cnt = result.inserted ?? result.created ?? 0;
+      setImpMsg(`匯入完成：新增/更新 ${cnt} 筆，略過 ${result.skipped ?? 0} 筆` +
+        (result.errors?.length ? `，${result.errors.length} 列錯誤` : ""));
       onRefresh && onRefresh();
-    } catch (e) {
-      setImpMsg("⚠ 匯入失敗：" + e.message);
+    } catch (err) {
+      setImpMsg("⚠ 匯入失敗：" + err.message);
     } finally {
       setBusy(false);
-      e.target.value = "";
     }
   };
 
@@ -426,7 +453,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
               <button className="btn" onClick={() => fileRef.current.click()} disabled={busy || loading}>
                 <Icon.Upload/>匯入
               </button>
-              <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImportCompleted}/>
+              <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={onImportFilePicked}/>
             </>
           )}
           <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
@@ -610,6 +637,44 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
             )}
           </div>
         </>
+      )}
+
+      {/* ── Sheet picker modal (已簽核完成 import) ── */}
+      {sheetModal && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 300,
+                      display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && setSheetModal(null)}>
+          <div className="card" style={{ width: 380, maxWidth: "92vw", padding: 0 }}>
+            <div className="card-head" style={{ padding: "16px 20px" }}>
+              <h3>選擇工作表</h3>
+              <button className="btn ghost sm" onClick={() => setSheetModal(null)}>✕</button>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
+                此 Excel 包含多個工作表，請選擇要匯入的工作表：
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
+                {sheetModal.sheets.map(s => (
+                  <label key={s} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                                          borderRadius: "var(--radius-sm)", cursor: "pointer",
+                                          background: sheetModal.selected === s ? "var(--accent-soft)" : "var(--surface-2)",
+                                          border: `1px solid ${sheetModal.selected === s ? "var(--accent)" : "var(--border)"}` }}>
+                    <input type="radio" name="sheet-list" value={s} checked={sheetModal.selected === s}
+                           onChange={() => setSheetModal(m => ({ ...m, selected: s }))}
+                           style={{ accentColor: "var(--accent)" }}/>
+                    <span style={{ fontSize: 13, fontWeight: sheetModal.selected === s ? 600 : 400 }}>{s}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                <button className="btn ghost" onClick={() => setSheetModal(null)}>取消</button>
+                <button className="btn primary" onClick={doImportSheet} disabled={busy}>
+                  {busy ? "匯入中…" : "確認匯入"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

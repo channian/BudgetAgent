@@ -926,20 +926,40 @@ def export_budgets():
 
 
 # ── Import (CSV / XLSX) ───────────────────────────────────────────────
+
+# Aliases for the standard "new budget" import (→ AI_REVIEW)
 IMPORT_ALIASES = {
     "project_name": ["項目名稱", "Project Name", "project_name", "project", "案件名稱"],
     "category":     ["類別", "category", "判定類別"],
-    "owner":        ["預算負責人", "owner", "負責人"],
+    "owner":        ["預算負責人", "Owner", "owner", "負責人"],
     "amount":       ["金額", "amount", "金額 (NT$)"],
     "budget_no":    ["預算單號", "BudgetNo.", "BudgetNo", "Budget No.", "Budget No", "budget_no"],
 }
 
+# Aliases for the "completed history" import (→ CLOSED / REJECTED)
+COMPLETED_IMPORT_ALIASES = {
+    "project_name":    ["Project Name", "項目名稱", "案件名稱", "project_name"],
+    "week":            ["週數(w)", "週數", "week", "Week"],
+    "category":        ["類別", "category"],
+    "budget_no":       ["BudgetNo.", "BudgetNo", "Budget No.", "預算單號", "budget_no"],
+    "owner":           ["預算負責人", "Owner", "owner", "負責人"],
+    "amount":          ["金額", "amount", "金額 (NT$)"],
+    "expert_comment":  ["專家評論", "expert_comment"],
+    "expert_decision": ["審核處置", "expert_decision"],
+    "dispatch_date":   ["派送日期", "dispatch_date"],
+    "sign_date":       ["簽核日期", "sign_date"],
+    "cycle_time":      ["Cycle time", "Cycle Time", "cycle_time", "CycleTime"],
+    "note":            ["備註", "note"],
+}
 
-def _resolve_header(header):
+
+def _resolve_header(header, aliases=None):
+    if aliases is None:
+        aliases = IMPORT_ALIASES
     norm = {str(h).strip(): i for i, h in enumerate(header)}
     idx = {}
-    for field, aliases in IMPORT_ALIASES.items():
-        for a in aliases:
+    for field, alts in aliases.items():
+        for a in alts:
             if a in norm:
                 idx[field] = norm[a]
                 break
@@ -955,6 +975,93 @@ def _parse_amount(v):
         return 0
 
 
+def _parse_week(v, default):
+    """Accept 'W21', '21', 21 → int week number."""
+    if v is None:
+        return default
+    import re as _re
+    m = _re.search(r'\d+', str(v))
+    return int(m.group()) if m else default
+
+
+def _parse_date(v):
+    """Accept Excel datetime, date object, or string → date string or None."""
+    if v is None:
+        return None
+    import datetime as _dt
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.strftime("%Y-%m-%d")
+    s = str(v).strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y", "%Y%m%d"):
+        try:
+            return _dt.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return s  # return as-is; DB will reject invalid dates gracefully
+
+
+def _parse_cycle(v):
+    """Accept '3', '3天', '3.5' → int days or None."""
+    if v is None:
+        return None
+    import re as _re
+    m = _re.search(r'[\d.]+', str(v))
+    if not m:
+        return None
+    try:
+        return int(float(m.group()))
+    except ValueError:
+        return None
+
+
+def _load_sheet(f, sheet_name=None):
+    """Load rows from an uploaded xlsx or csv file.
+    Returns (header_row, data_rows) where all values are plain strings/scalars."""
+    name = f.filename.lower()
+    if name.endswith(".xlsx"):
+        from openpyxl import load_workbook
+        wb = load_workbook(f, read_only=True, data_only=True)
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active
+        data = list(ws.iter_rows(values_only=True))
+        if not data:
+            raise ValueError("工作表是空的")
+        return data[0], data[1:]
+    elif name.endswith(".csv"):
+        rows = list(csv.reader(f.read().decode("utf-8-sig").splitlines()))
+        if not rows:
+            raise ValueError("檔案是空的")
+        return rows[0], rows[1:]
+    else:
+        raise ValueError("僅支援 .csv 或 .xlsx 檔案")
+
+
+# ── GET sheet names (probe endpoint) ─────────────────────────────────
+@budgets_bp.post("/budgets/import/sheets")
+@require_auth
+def import_get_sheets():
+    """Return the list of sheet names in an uploaded xlsx (or a placeholder for csv)."""
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(error="未收到檔案"), 400
+    name = f.filename.lower()
+    if name.endswith(".xlsx"):
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(f, read_only=True, data_only=True)
+            return jsonify(sheets=wb.sheetnames)
+        except Exception as e:
+            return jsonify(error=f"檔案解析失敗：{e}"), 500
+    elif name.endswith(".csv"):
+        return jsonify(sheets=["(單一工作表)"])
+    else:
+        return jsonify(error="僅支援 .csv 或 .xlsx 檔案"), 400
+
+
 @budgets_bp.post("/budgets/import")
 @require_auth
 def import_budgets():
@@ -963,30 +1070,27 @@ def import_budgets():
     if not f or not f.filename:
         return jsonify(error="未收到檔案"), 400
 
-    name = f.filename.lower()
-    raw_rows = []
+    mode       = request.args.get("mode", "pending")   # "pending" | "completed"
+    sheet_name = request.args.get("sheet", None)
+
     try:
-        if name.endswith(".xlsx"):
-            from openpyxl import load_workbook
-            wb   = load_workbook(f, read_only=True, data_only=True)
-            data = list(wb.active.iter_rows(values_only=True))
-            if not data:
-                return jsonify(error="檔案是空的"), 400
-            idx      = _resolve_header(data[0])
-            raw_rows = data[1:]
-        elif name.endswith(".csv"):
-            reader   = list(csv.reader(io.StringIO(f.read().decode("utf-8-sig"))))
-            if not reader:
-                return jsonify(error="檔案是空的"), 400
-            idx      = _resolve_header(reader[0])
-            raw_rows = reader[1:]
-        else:
-            return jsonify(error="僅支援 .csv 或 .xlsx 檔案"), 400
+        header, raw_rows = _load_sheet(f, sheet_name)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
     except Exception as e:
         return jsonify(error=f"檔案解析失敗：{e}"), 500
 
+    if mode == "completed":
+        return _import_completed(header, raw_rows, user)
+    else:
+        return _import_pending(header, raw_rows, user)
+
+
+def _import_pending(header, raw_rows, user):
+    """Original import logic: upsert into AI_REVIEW status."""
+    idx = _resolve_header(header, IMPORT_ALIASES)
     if "project_name" not in idx:
-        return jsonify(error="找不到「項目名稱」欄位，請確認標題列"), 400
+        return jsonify(error="找不到「項目名稱 / Project Name」欄位，請確認標題列"), 400
 
     _, iso_week, _ = datetime.datetime.now().isocalendar()
     inserted, skipped, errors = 0, 0, []
@@ -1018,35 +1122,107 @@ def import_budgets():
                            WHERE budget_requests.status NOT IN
                                  ('CLOSED', 'REJECTED', 'PENDING_ACTION')
                            RETURNING id""",
-                        (
-                            project,
-                            iso_week,
-                            cell(row, "category"),
-                            cell(row, "owner"),
-                            _parse_amount(cell(row, "amount")),
-                            cell(row, "budget_no"),
-                        ),
+                        (project, iso_week, cell(row, "category"),
+                         cell(row, "owner"), _parse_amount(cell(row, "amount")),
+                         cell(row, "budget_no")),
                     )
-                    # No row returned → an already-reviewed case was protected
-                    # from being overwritten by re-import; count it as skipped.
                     if cur.fetchone():
                         inserted += 1
                     else:
                         skipped += 1
-                except Exception as re:
-                    errors.append(f"第 {n} 列：{re}")
+                except Exception as row_err:
+                    errors.append(f"第 {n} 列：{row_err}")
     except Exception as e:
         return jsonify(error=str(e)), 500
 
+    _audit_and_notify(user, inserted, skipped)
+    return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
+
+
+def _import_completed(header, raw_rows, user):
+    """Import historical completed records directly into CLOSED / REJECTED status."""
+    idx = _resolve_header(header, COMPLETED_IMPORT_ALIASES)
+    if "project_name" not in idx:
+        return jsonify(error="找不到「Project Name / 項目名稱」欄位，請確認標題列"), 400
+
+    _, iso_week, _ = datetime.datetime.now().isocalendar()
+    inserted, skipped, errors = 0, 0, []
+
+    def cell(row, field):
+        i = idx.get(field)
+        if i is None or i >= len(row):
+            return None
+        v = row[i]
+        return None if v is None or str(v).strip() == "" else str(v).strip()
+
+    def raw_cell(row, field):
+        i = idx.get(field)
+        if i is None or i >= len(row):
+            return None
+        return row[i]
+
+    try:
+        with db_cursor(commit=True) as cur:
+            for n, row in enumerate(raw_rows, start=2):
+                project = cell(row, "project_name")
+                if not project:
+                    skipped += 1
+                    continue
+                try:
+                    decision  = cell(row, "expert_decision") or ""
+                    status    = "REJECTED" if "退件" in decision else "CLOSED"
+                    exp_dec   = "退件" if "退件" in decision else ("通過" if decision else None)
+                    wk        = _parse_week(raw_cell(row, "week"), iso_week)
+                    amount    = _parse_amount(cell(row, "amount"))
+                    d_date    = _parse_date(raw_cell(row, "dispatch_date"))
+                    s_date    = _parse_date(raw_cell(row, "sign_date"))
+                    cycle     = _parse_cycle(cell(row, "cycle_time"))
+
+                    cur.execute(
+                        """INSERT INTO budget.budget_requests
+                               (project_name, week, category, budget_no, owner, amount,
+                                expert_comment, expert_decision, dispatch_date, sign_date,
+                                cycle_time, note, status)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (project_name) DO UPDATE SET
+                               week            = EXCLUDED.week,
+                               category        = EXCLUDED.category,
+                               budget_no       = COALESCE(EXCLUDED.budget_no, budget_requests.budget_no),
+                               owner           = COALESCE(EXCLUDED.owner, budget_requests.owner),
+                               amount          = COALESCE(NULLIF(EXCLUDED.amount,0), budget_requests.amount),
+                               expert_comment  = EXCLUDED.expert_comment,
+                               expert_decision = EXCLUDED.expert_decision,
+                               dispatch_date   = EXCLUDED.dispatch_date,
+                               sign_date       = EXCLUDED.sign_date,
+                               cycle_time      = EXCLUDED.cycle_time,
+                               note            = EXCLUDED.note,
+                               status          = EXCLUDED.status
+                           RETURNING id""",
+                        (project, wk, cell(row, "category"), cell(row, "budget_no"),
+                         cell(row, "owner"), amount, cell(row, "expert_comment"),
+                         exp_dec, d_date, s_date, cycle, cell(row, "note"), status),
+                    )
+                    if cur.fetchone():
+                        inserted += 1
+                    else:
+                        skipped += 1
+                except Exception as row_err:
+                    errors.append(f"第 {n} 列：{row_err}")
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    _audit_and_notify(user, inserted, skipped)
+    return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
+
+
+def _audit_and_notify(user, inserted, skipped):
     try:
         audit_log(None, "IMPORT", user.get("name", "system"), None,
                   {"inserted": inserted, "skipped": skipped})
     except Exception:
         pass
-
     _notify_roles(["admin"],
         f"📥 {user.get('name','系統')} 匯入了 {inserted} 筆案件（略過 {skipped} 筆）。")
-    return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
 
 
 # ── Timeline ──────────────────────────────────────────────────────────
