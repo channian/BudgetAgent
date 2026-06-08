@@ -940,7 +940,9 @@ IMPORT_ALIASES = {
 COMPLETED_IMPORT_ALIASES = {
     "project_name":    ["Project Name", "項目名稱", "案件名稱", "project_name"],
     "week":            ["週數(w)", "週數", "week", "Week"],
-    "category":        ["類別", "category"],
+    "category":        ["類別", "category", "判定類別"],
+    "sub_category":    ["系統", "判定系統", "sub_category", "Sub Category"],
+    "expert_name":     ["負責專家", "Expert", "expert_name"],
     "budget_no":       ["BudgetNo.", "BudgetNo", "Budget No.", "預算單號", "budget_no"],
     "owner":           ["預算負責人", "Owner", "owner", "負責人"],
     "amount":          ["金額", "amount", "金額 (NT$)"],
@@ -1130,6 +1132,7 @@ def _import_pending(header, raw_rows, user):
                 if not project:
                     skipped += 1
                     continue
+                cur.execute("SAVEPOINT _row")
                 try:
                     cur.execute(
                         """INSERT INTO budget.budget_requests
@@ -1147,11 +1150,14 @@ def _import_pending(header, raw_rows, user):
                          cell(row, "owner"), _parse_amount(cell(row, "amount")),
                          cell(row, "budget_no")),
                     )
-                    if cur.fetchone():
+                    row_result = cur.fetchone()
+                    cur.execute("RELEASE SAVEPOINT _row")
+                    if row_result:
                         inserted += 1
                     else:
                         skipped += 1
                 except Exception as row_err:
+                    cur.execute("ROLLBACK TO SAVEPOINT _row")
                     errors.append(f"第 {n} 列：{row_err}")
     except Exception as e:
         return jsonify(error=str(e)), 500
@@ -1189,6 +1195,7 @@ def _import_completed(header, raw_rows, user):
                 if not project:
                     skipped += 1
                     continue
+                cur.execute("SAVEPOINT _row")
                 try:
                     decision  = cell(row, "expert_decision") or ""
                     status    = "REJECTED" if "退件" in decision else "CLOSED"
@@ -1201,13 +1208,16 @@ def _import_completed(header, raw_rows, user):
 
                     cur.execute(
                         """INSERT INTO budget.budget_requests
-                               (project_name, week, category, budget_no, owner, amount,
+                               (project_name, week, category, sub_category, expert_name,
+                                budget_no, owner, amount,
                                 expert_comment, expert_decision, dispatch_date, sign_date,
                                 cycle_time, note, status)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                            ON CONFLICT (project_name) DO UPDATE SET
                                week            = EXCLUDED.week,
                                category        = EXCLUDED.category,
+                               sub_category    = COALESCE(EXCLUDED.sub_category, budget_requests.sub_category),
+                               expert_name     = COALESCE(EXCLUDED.expert_name, budget_requests.expert_name),
                                budget_no       = COALESCE(EXCLUDED.budget_no, budget_requests.budget_no),
                                owner           = COALESCE(EXCLUDED.owner, budget_requests.owner),
                                amount          = COALESCE(NULLIF(EXCLUDED.amount,0), budget_requests.amount),
@@ -1219,15 +1229,19 @@ def _import_completed(header, raw_rows, user):
                                note            = EXCLUDED.note,
                                status          = EXCLUDED.status
                            RETURNING id""",
-                        (project, wk, cell(row, "category"), cell(row, "budget_no"),
+                        (project, wk, cell(row, "category"), cell(row, "sub_category"),
+                         cell(row, "expert_name"), cell(row, "budget_no"),
                          cell(row, "owner"), amount, cell(row, "expert_comment"),
                          exp_dec, d_date, s_date, cycle, cell(row, "note"), status),
                     )
-                    if cur.fetchone():
+                    row_result = cur.fetchone()
+                    cur.execute("RELEASE SAVEPOINT _row")
+                    if row_result:
                         inserted += 1
                     else:
                         skipped += 1
                 except Exception as row_err:
+                    cur.execute("ROLLBACK TO SAVEPOINT _row")
                     errors.append(f"第 {n} 列：{row_err}")
     except Exception as e:
         return jsonify(error=str(e)), 500

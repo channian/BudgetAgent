@@ -392,8 +392,9 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
 
-  // Split pending into three groups
-  const aiReviewCases  = allPending.filter(b => b.status === "AI_REVIEW");
+  // Split pending into four groups
+  const aiReadyCases   = allPending.filter(b => b.status === "AI_REVIEW" && (b.aiResult || b.aiReason));
+  const noAiCases      = allPending.filter(b => b.status === "AI_REVIEW" && !b.aiResult && !b.aiReason);
   const readyToSign    = allPending.filter(b => b.status !== "AI_REVIEW" && hasComment(b));
   const awaitingExpert = allPending.filter(b => b.status !== "AI_REVIEW" && !hasComment(b));
 
@@ -601,7 +602,8 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const readyToSignView   = React.useMemo(() => applyView(readyToSign),    [applyView, budgets]);
   const awaitingExpertView= React.useMemo(() => applyView(awaitingExpert), [applyView, budgets]);
-  const aiReviewView      = React.useMemo(() => applyView(aiReviewCases),  [applyView, budgets]);
+  const aiReviewView      = React.useMemo(() => applyView(aiReadyCases),   [applyView, budgets]);
+  const noAiView          = React.useMemo(() => applyView(noAiCases),       [applyView, budgets]);
   const completedView     = React.useMemo(() => {
     let r = applyView(completed);
     if (filterStart) r = r.filter(b => b.signDate && b.signDate >= filterStart);
@@ -770,7 +772,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       {/* ── 待簽核 main page ── */}
       {isPending && (
         <>
-          {/* AI_REVIEW cases — visible to all, actionable by admin in dispatch center */}
+          {/* Cases with AI data ready — admin dispatches to expert */}
           {aiReviewView.length > 0 && (
             <div className="card" style={{ flexShrink: 0 }}>
               <div className="card-head" style={{ background: "oklch(0.96 0.02 290)" }}>
@@ -792,6 +794,34 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
                     { k: "status",   label: "狀態",       w: 110, min: 90  },
                   ]}
                   rows={aiReviewView}
+                  onRow={onRow}
+                  sort={sort} toggleSort={toggleSort} arr={arr}
+                  startColResize={startColResize} setCols={setCols}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Cases without AI data yet — waiting for pipeline */}
+          {noAiView.length > 0 && (
+            <div className="card" style={{ flexShrink: 0 }}>
+              <div className="card-head" style={{ background: "oklch(0.97 0.01 60)" }}>
+                <h3 style={{ color: "#92400e" }}>
+                  待 AI 處理
+                  <span className="block-tag" style={{ marginLeft: 8 }}>等待 AI pipeline 初審結果</span>
+                </h3>
+                <span className="hint">{noAiView.length} 件</span>
+              </div>
+              <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                <BudgetTable
+                  cols={[
+                    { k: "week",    label: "週數",       w: 78,  min: 60,  sortable: true },
+                    { k: "project", label: "項目名稱",   w: 280, min: 180 },
+                    { k: "owner",   label: "預算負責人", w: 130, min: 100 },
+                    { k: "amount",  label: "金額 (NT$)", w: 130, min: 110, align: "right", sortable: true },
+                    { k: "status",  label: "狀態",       w: 110, min: 90  },
+                  ]}
+                  rows={noAiView}
                   onRow={onRow}
                   sort={sort} toggleSort={toggleSort} arr={arr}
                   startColResize={startColResize} setCols={setCols}

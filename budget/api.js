@@ -352,6 +352,45 @@ async function apiImportBudgets(file, options = {}) {
   return body;
 }
 
+// ── Attachments ───────────────────────────────────────────────────────
+async function apiUploadAttachment(budgetId, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${API_BASE}/api/budgets/${budgetId}/attachments`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body.attachment;
+}
+async function apiFetchAttachments(budgetId) {
+  const d = await apiFetch(`/api/budgets/${budgetId}/attachments`);
+  return d.attachments || [];
+}
+async function apiDownloadAttachment(attId, originalName) {
+  const res = await fetch(`${API_BASE}/api/attachments/${attId}/download`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)/i);
+  const fname = m ? decodeURIComponent(m[1].trim()) : (originalName || `attachment_${attId}`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+async function apiDeleteAttachment(attId) {
+  await apiFetch(`/api/attachments/${attId}`, { method: "DELETE" });
+}
+
 // ── AI Library (RAG systems + entries) ───────────────────────────────
 async function apiFetchRagSystems() {
   const d = await apiFetch("/api/rag/systems");
@@ -439,6 +478,11 @@ window.API = {
   markRead:            apiMarkNotificationRead,
   lookupEmployee:      apiLookupEmployee,
   fetchLoginStats:     apiFetchLoginStats,
+  // Attachments
+  uploadAttachment:    apiUploadAttachment,
+  fetchAttachments:    apiFetchAttachments,
+  downloadAttachment:  apiDownloadAttachment,
+  deleteAttachment:    apiDeleteAttachment,
   // AI Library
   fetchRagSystems:     apiFetchRagSystems,
   createRagSystem:     apiCreateRagSystem,

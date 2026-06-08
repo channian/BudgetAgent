@@ -461,7 +461,7 @@ function AssignmentPage({ currentUser }) {
         API.fetchBudgets("completed"),
         API.fetchUsers(),
       ]);
-      const ai   = pending.filter(b => b.status === "AI_REVIEW");
+      const ai   = pending.filter(b => b.status === "AI_REVIEW" && (b.aiResult || b.aiReason));
       const sent = [
         ...pending.filter(b => b.status !== "AI_REVIEW"),
         ...completed.filter(b => b.dispatchDate),
