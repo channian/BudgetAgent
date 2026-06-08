@@ -411,12 +411,52 @@ def process():
 
     print(f"\n✅ 完成：共 {len(all_cases)} 筆全部判定完成"
           f"（規則 {rule_count} 筆 / LLM {len(rule_unknown)} 筆），無未知系統")
-    print("   → 直接執行 pipeline_2.py（本地審核並寫入 DB）")
+
+    # ── 複製結果到剪貼簿（供 RPA 取走送至線上 AI 審核）───────────────────
+    _copy_to_clipboard(all_cases)
+    print("   → 結果已複製至剪貼簿，請啟動 RPA 並貼上後送至線上 AI 審核")
 
 
 def _save(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def _copy_to_clipboard(cases: list):
+    """
+    將分類結果複製至剪貼簿（JSON 格式），供 RPA 取走送至線上 AI 審核。
+    格式：JSON 陣列，每筆含 案件名稱/判定系統/判定類別/負責專家/檔案實體清單/所有檔案原文。
+    優先使用 pyperclip；失敗則嘗試 win32clipboard；皆無則存至 clipboard_output.txt。
+    """
+    text = json.dumps(cases, indent=2, ensure_ascii=False)
+    saved = False
+
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        print(f"📋 已複製 {len(cases)} 筆至剪貼簿（pyperclip）")
+        saved = True
+    except Exception:
+        pass
+
+    if not saved:
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+            win32clipboard.CloseClipboard()
+            print(f"📋 已複製 {len(cases)} 筆至剪貼簿（win32clipboard）")
+            saved = True
+        except Exception:
+            pass
+
+    if not saved:
+        fallback = os.path.join(WORK_DIR, "clipboard_output.txt")
+        with open(fallback, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"⚠️  剪貼簿寫入失敗，結果已存至：{fallback}")
+        print("   （請手動複製該檔案內容送至線上 AI）")
 
 
 if __name__ == "__main__":
