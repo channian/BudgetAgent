@@ -558,8 +558,8 @@ function AssignmentPage() {
   );
 }
 
-const ROLE_LABELS = { admin: "系統管理員", boss: "主管簽核", expert: "專家複審", viewer: "檢視者" };
-const ROLE_COLORS = { admin: "var(--bad)", boss: "var(--info)", expert: "var(--accent)", viewer: "var(--text-muted)" };
+const ROLE_LABELS = { admin: "系統管理員", expert: "專家複審", viewer: "檢視者" };
+const ROLE_COLORS = { admin: "var(--bad)", expert: "var(--accent)", viewer: "var(--text-muted)" };
 
 const EMPTY_FORM = { name: "", ad_account: "", department: "", email: "", role: "viewer" };
 
@@ -727,7 +727,6 @@ function PermissionsPage() {
                   <label>角色 <span className="req">*</span></label>
                   <select value={form.role} onChange={e => set("role", e.target.value)}>
                     <option value="admin">admin — 系統管理員</option>
-                    <option value="boss">boss — 主管簽核</option>
                     <option value="expert">expert — 專家複審</option>
                     <option value="viewer">viewer — 檢視者</option>
                   </select>

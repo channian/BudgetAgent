@@ -214,7 +214,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const isCompleted    = scope === "approved";
   const role    = currentUser?.role || "viewer";
   const isAdmin = role === "admin";
-  const canSign = role === "admin" || role === "boss";
+  const canSign = role === "admin";
 
   const allPending = budgets.filter(b => PENDING_STATUSES.includes(b.status));
   const completed  = budgets.filter(b => COMPLETED_STATUSES.includes(b.status));
@@ -384,7 +384,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const pageTitle = isPending ? "待簽核案件" : isExpertReview ? "待專家審核案件" : "已簽核完成案件";
   const pageLede  = isPending
-    ? "專家評論完成後進入待簽核，由 boss / 系統管理員簽核結案"
+    ? "專家評論完成後進入待簽核，由系統管理員簽核結案"
     : isExpertReview
     ? "已派發案件在此等待專家填寫審核意見；填寫完成後自動進入待簽核流程"
     : "已完成完整審核流程之預算案件，可匯出稽核紀錄";
@@ -463,7 +463,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         )}
       </div>
 
-      {/* ── 待簽核 main page — only cases ready for boss/admin to sign ── */}
+      {/* ── 待簽核 main page — only cases ready for admin to sign ── */}
       {isPending && (
         <>
           <div className="block-head">

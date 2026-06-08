@@ -534,7 +534,7 @@ def review_budget(budget_id):
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "EXPERT_COMMENT", user.get("name", "system"), before, after)
-    _notify_roles(["admin", "boss"],
+    _notify_roles(["admin"],
         f"📝 {user.get('name','專家')} 已完成案件「{before['project_name']}」(#{budget_id}) 的專家評論，待簽核。")
     return jsonify(budget=after)
 
@@ -547,8 +547,8 @@ def approve_budget(budget_id):
     user    = current_user()
     comment = data.get("comment", "")
 
-    if user.get("role") not in ("admin", "boss"):
-        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行簽核"), 403
 
     try:
         with db_cursor() as cur:
@@ -599,8 +599,8 @@ def reject_budget(budget_id):
     final      = bool(data.get("final", False))
     new_status = "REJECTED" if final else "PENDING_ACTION"
 
-    if user.get("role") not in ("admin", "boss"):
-        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行簽核"), 403
 
     try:
         with db_cursor() as cur:
@@ -649,8 +649,8 @@ def batch_sign():
     rejected if the expert recommended 退件. If any single case fails
     validation, the whole batch rolls back and nothing is signed."""
     user = current_user()
-    if user.get("role") not in ("admin", "boss"):
-        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行簽核"), 403
 
     ids = (request.json or {}).get("ids") or []
     if not isinstance(ids, list) or not ids:

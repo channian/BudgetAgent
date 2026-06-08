@@ -130,7 +130,7 @@ function App() {
 
   // Badge counts
   const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
-  // 待簽核 = only dispatched cases with expert comment ready for boss/admin
+  // 待簽核 = only dispatched cases with expert comment ready for admin to sign
   const pendingCount = budgets.filter(b =>
     (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && hasComment(b)
   ).length;

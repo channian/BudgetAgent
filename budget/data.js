@@ -219,10 +219,9 @@ const AGENTS = [
 ];
 
 const ROLES = [
-  { id: "admin",  name: "系統管理員", desc: "完整權限，含派發中心、權限管理與簽核", count: 2 },
-  { id: "boss",   name: "主管簽核",   desc: "可對專家評論完成之案件執行最終簽核", count: 1 },
+  { id: "admin",  name: "系統管理員", desc: "完整權限，含派發中心、權限管理與最終簽核", count: 2 },
   { id: "expert", name: "專家複審",   desc: "可填寫專家複審評論與建議處置（無簽核權）", count: 8 },
-  { id: "viewer", name: "檢視者",     desc: "唯讀，可瀏覽待簽核、已簽核完成、AI Agent 圖書館", count: 6 },
+  { id: "viewer", name: "檢視者",     desc: "唯讀，可瀏覽待簽核、待專家審核、已簽核完成、AI Agent 圖書館", count: 6 },
 ];
 
 window.MOCK = {
