@@ -134,10 +134,9 @@ function App() {
   const pendingCount = budgets.filter(b =>
     (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && hasComment(b)
   ).length;
-  // 待專家審核 = AI_REVIEW (pending dispatch) + dispatched but no comment yet
+  // 待專家審核 = dispatched cases without expert comment yet
   const expertReviewCount = budgets.filter(b =>
-    b.status === "AI_REVIEW" ||
-    ((b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && !hasComment(b))
+    (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && !hasComment(b)
   ).length;
 
   const openDetail = (b, source) => {

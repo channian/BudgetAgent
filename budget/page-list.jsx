@@ -125,7 +125,7 @@ function BudgetTable({
 
   return (
     <div className="table-scroll">
-      <table className="dt" style={{ width: extraW + cols.reduce((s, c) => s + c.w, 0) }}>
+      <table className="dt" style={{ width: "100%", minWidth: extraW + cols.reduce((s, c) => s + c.w, 0) }}>
         <colgroup>
           {showSelect && <col style={{ width: chkW }} />}
           {cols.map((c) => <col key={c.k} style={{ width: c.w }} />)}
@@ -372,7 +372,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   // KPI counts
   const allDisplay  = isCompleted ? completedView
                     : isPending   ? readyToSignView
-                    : /* expert */ [...aiReviewView, ...awaitingExpertView];
+                    : /* expert */ awaitingExpertView;
   const totalAmt    = allDisplay.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const aiApprovedCnt = allDisplay.filter((b) => b.aiResult === "approve").length;
   const overSLA     = allDisplay.filter((b) => {
@@ -386,7 +386,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const pageLede  = isPending
     ? "專家評論完成後進入待簽核，由 boss / 系統管理員簽核結案"
     : isExpertReview
-    ? "AI 初審完成的案件在此等待派發與專家評論；派發後專家在下方填寫審核意見"
+    ? "已派發案件在此等待專家填寫審核意見；填寫完成後自動進入待簽核流程"
     : "已完成完整審核流程之預算案件，可匯出稽核紀錄";
 
   return (
@@ -418,7 +418,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
           <div className="val tnum">{allDisplay.length}<small>件</small></div>
           <div className="delta up">
             {isPending      ? `共 ${readyToSignView.length} 件待簽核` :
-             isExpertReview ? `待派發 ${aiReviewView.length} · 待評論 ${awaitingExpertView.length}` :
+             isExpertReview ? `共 ${awaitingExpertView.length} 件待評論` :
              "已結案"}
           </div>
         </div>
@@ -487,35 +487,10 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         </>
       )}
 
-      {/* ── 待專家審核 page: two blocks ── */}
+      {/* ── 待專家審核 page ── */}
       {isExpertReview && (
         <>
-          {/* Block 1: AI_REVIEW — same data as 派發中心; admin fills budget_no here */}
           <div className="block-head">
-            <h3>待派發案件 <span className="block-tag">AI 初審完成，同步顯示於派發中心；可在此填入預算單號</span></h3>
-            <span className="hint">{aiReviewView.length} 件</span>
-          </div>
-          <div className="table-wrap">
-            {aiReviewView.length === 0 ? (
-              <div className="empty">目前沒有待派發案件</div>
-            ) : (
-              <BudgetTable
-                cols={AI_REVIEW_COLS}
-                rows={aiReviewView}
-                onRow={onRow}
-                sort={sort} toggleSort={toggleSort} arr={arr}
-                startColResize={(_, e) => { e.preventDefault(); e.stopPropagation(); }}
-                setCols={() => {}}
-                onBudgetNoSaved={(dbId, val) => {
-                  setBudgetNoOverrides(prev => ({ ...prev, [dbId]: val }));
-                  Toast.show("✅ 預算單號已儲存", "ok");
-                }}
-              />
-            )}
-          </div>
-
-          {/* Block 2: dispatched cases waiting for expert comment */}
-          <div className="block-head" style={{ marginTop: 22 }}>
             <h3>待專家審核 <span className="block-tag">已派發，等待專家填寫評論</span></h3>
             <span className="hint">{awaitingExpertView.length} 件</span>
           </div>
