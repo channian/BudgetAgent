@@ -28,7 +28,7 @@ LDAP_DOMAIN   = os.getenv("LDAP_DOMAIN",   "KH")       # NetBIOS domain name
 LDAP_BASE_DN  = os.getenv("LDAP_BASE_DN",  "DC=ase,DC=com,DC=tw")
 # UPN suffix for SIMPLE bind — run: dsquery * -filter "(sAMAccountName=K20076)" -attr userPrincipalName
 # to find the real suffix. Typically matches the company email domain.
-LDAP_UPN_SUFFIX = os.getenv("LDAP_UPN_SUFFIX", "aseglobal.com")
+LDAP_UPN_SUFFIX = os.getenv("LDAP_UPN_SUFFIX", "kh.asegroup.com")
 LDAP_BIND_USER = os.getenv("LDAP_BIND_USER", "")        # service account sAMAccountName
 LDAP_BIND_PASS = os.getenv("LDAP_BIND_PASS", "")        # service account password
 
