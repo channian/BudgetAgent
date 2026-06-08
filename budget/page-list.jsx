@@ -42,6 +42,25 @@ const AI_REVIEW_COLS = [
   { k: "budgetNoEdit",label: "預算單號",     w: 200, min: 160 },
 ];
 
+// Columns shown in 已簽核明細 — order/labels mirror the import Excel:
+// 週數(w), 類別, BudgetNo., Project Name, 目前關卡, 預算負責人, 金額,
+// 專家評論, 審核處置, 派送日期, 簽核日期, Cycle time, 備註
+const COMPLETED_COLS = [
+  { k: "week",         label: "週數(w)",     w: 80,  sortable: true, min: 60 },
+  { k: "category",     label: "類別",         w: 120, min: 90 },
+  { k: "id",           label: "BudgetNo.",    w: 150, min: 120 },
+  { k: "project",      label: "Project Name", w: 240, min: 160 },
+  { k: "status",       label: "目前關卡",     w: 110, min: 90 },
+  { k: "owner",        label: "預算負責人",   w: 130, min: 100 },
+  { k: "amount",       label: "金額 (NT$)",   w: 130, sortable: true, min: 110, align: "right" },
+  { k: "expertComment",label: "專家評論",     w: 200, min: 140 },
+  { k: "expertResult", label: "審核處置",     w: 110, min: 90 },
+  { k: "dispatchDate", label: "派送日期",     w: 120, sortable: true, min: 100 },
+  { k: "signDate",     label: "簽核日期",     w: 120, min: 100 },
+  { k: "cycle",        label: "Cycle Time",   w: 110, min: 90 },
+  { k: "note",         label: "備註",         w: 180, min: 120 },
+];
+
 const PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"];
 const COMPLETED_STATUSES = ["CLOSED", "REJECTED"];
 
@@ -287,9 +306,9 @@ function HBarChart({ data, emptyMsg = "無資料" }) {
   }
   const COLORS = ["#e86b4f","#c0456a","#7c3aed","#3b82f6","#06b6d4","#10b981","#f59e0b","#8b5cf6","#ec4899","#6366f1"];
   const maxVal = Math.max(...data.map(d => d.value), 1);
-  const ROW_H = 26, GAP = 5;
-  const LW = 108, BW = 172, RW = 82;
-  const TW = LW + BW + RW;   // 362 — fits ~340px+ containers without shrinking text
+  const ROW_H = 34, GAP = 8;
+  const LW = 120, BW = 232, RW = 96;
+  const TW = LW + BW + RW;   // 448 — wider bars; container column widened to match
   const TH = data.length * (ROW_H + GAP);
 
   return (
@@ -302,13 +321,13 @@ function HBarChart({ data, emptyMsg = "無資料" }) {
         const lbl   = d.label.length > 13 ? d.label.slice(0, 12) + "…" : d.label;
         return (
           <g key={i}>
-            <text x={20} y={y + ROW_H / 2 + 4} textAnchor="middle" fontSize={10}
+            <text x={22} y={y + ROW_H / 2 + 4} textAnchor="middle" fontSize={11}
                   fill="#9ca3af" fontFamily="system-ui">#{i + 1}</text>
-            <text x={LW - 6} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize={11.5}
+            <text x={LW - 8} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize={12.5}
                   fill="var(--text)" fontFamily="system-ui">{lbl}</text>
-            <rect x={LW} y={y + 4} width={BW} height={ROW_H - 8} rx={3} fill="#f3f4f6" opacity={0.6}/>
-            <rect x={LW} y={y + 4} width={Math.max(bw, 3)} height={ROW_H - 8} rx={3} fill={color} opacity={0.82}/>
-            <text x={LW + BW + 7} y={y + ROW_H / 2 + 4} fontSize={11.5} fill="var(--text)"
+            <rect x={LW} y={y + 5} width={BW} height={ROW_H - 10} rx={3} fill="#f3f4f6" opacity={0.6}/>
+            <rect x={LW} y={y + 5} width={Math.max(bw, 3)} height={ROW_H - 10} rx={3} fill={color} opacity={0.82}/>
+            <text x={LW + BW + 8} y={y + ROW_H / 2 + 4} fontSize={12.5} fill="var(--text)"
                   fontWeight={600} fontFamily="system-ui">{disp}</text>
           </g>
         );
@@ -392,16 +411,18 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
 
-  // Split pending into four groups
-  const aiReadyCases   = allPending.filter(b => b.status === "AI_REVIEW" && (b.aiResult || b.aiReason));
+  // Split pending into groups. Cases WITH AI data live in 派發中心 (待派發),
+  // so the 待簽核 page only surfaces cases still waiting for the AI pipeline.
   const noAiCases      = allPending.filter(b => b.status === "AI_REVIEW" && !b.aiResult && !b.aiReason);
   const readyToSign    = allPending.filter(b => b.status !== "AI_REVIEW" && hasComment(b));
   const awaitingExpert = allPending.filter(b => b.status !== "AI_REVIEW" && !hasComment(b));
 
+  const baseCols = isCompleted ? COMPLETED_COLS : DEFAULT_COLS;
+
   const [q, setQ]           = React.useState("");
   const [aiFilter, setAiFilter] = React.useState("all");
   const [sort, setSort]     = React.useState({ k: "dispatchDate", dir: "desc" });
-  const [cols, setCols]     = React.useState(DEFAULT_COLS);
+  const [cols, setCols]     = React.useState(baseCols);
   const [selected, setSelected] = React.useState(new Set());
   const [batchBusy, setBatchBusy] = React.useState(false);
 
@@ -540,8 +561,8 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   React.useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storeKey) || "null");
-      if (saved && Array.isArray(saved) && saved.length === DEFAULT_COLS.length) {
-        setCols(DEFAULT_COLS.map((c, i) => ({ ...c, w: saved[i] || c.w })));
+      if (saved && Array.isArray(saved) && saved.length === baseCols.length) {
+        setCols(baseCols.map((c, i) => ({ ...c, w: saved[i] || c.w })));
       }
     } catch {}
   }, [storeKey]);
@@ -602,7 +623,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const readyToSignView   = React.useMemo(() => applyView(readyToSign),    [applyView, budgets]);
   const awaitingExpertView= React.useMemo(() => applyView(awaitingExpert), [applyView, budgets]);
-  const aiReviewView      = React.useMemo(() => applyView(aiReadyCases),   [applyView, budgets]);
   const noAiView          = React.useMemo(() => applyView(noAiCases),       [applyView, budgets]);
   const completedView     = React.useMemo(() => {
     let r = applyView(completed);
@@ -772,37 +792,8 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       {/* ── 待簽核 main page ── */}
       {isPending && (
         <>
-          {/* Cases with AI data ready — admin dispatches to expert */}
-          {aiReviewView.length > 0 && (
-            <div className="card" style={{ flexShrink: 0 }}>
-              <div className="card-head" style={{ background: "oklch(0.96 0.02 290)" }}>
-                <h3 style={{ color: "#7c3aed" }}>
-                  AI 初審完成，待派發
-                  <span className="block-tag" style={{ marginLeft: 8 }}>等待管理員派發給專家</span>
-                </h3>
-                <span className="hint">{aiReviewView.length} 件</span>
-              </div>
-              <div style={{ maxHeight: 240, overflowY: "auto" }}>
-                <BudgetTable
-                  cols={[
-                    { k: "week",     label: "週數",       w: 78,  min: 60,  sortable: true },
-                    { k: "project",  label: "項目名稱",   w: 260, min: 160 },
-                    { k: "category", label: "類別",       w: 130, min: 100 },
-                    { k: "subCategory", label: "系統",    w: 120, min: 90  },
-                    { k: "owner",    label: "預算負責人", w: 130, min: 100 },
-                    { k: "amount",   label: "金額 (NT$)", w: 130, min: 110, align: "right", sortable: true },
-                    { k: "status",   label: "狀態",       w: 110, min: 90  },
-                  ]}
-                  rows={aiReviewView}
-                  onRow={onRow}
-                  sort={sort} toggleSort={toggleSort} arr={arr}
-                  startColResize={startColResize} setCols={setCols}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Cases without AI data yet — waiting for pipeline */}
+          {/* Cases without AI data yet — waiting for pipeline.
+              Cases that already have AI data are handled in 派發中心, not here. */}
           {noAiView.length > 0 && (
             <div className="card" style={{ flexShrink: 0 }}>
               <div className="card-head" style={{ background: "oklch(0.97 0.01 60)" }}>
@@ -914,11 +905,11 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
             </div>
           </div>
 
-          {/* ── Row 2: 完成件數排行 + 已簽核明細（同一行） ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: 16 }}>
+          {/* ── Row 2: 完成件數排行 + 已簽核明細（同一行，高度約 10 列，其餘內部 scroll） ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(420px, 480px) 1fr", gap: 16, height: 520 }}>
 
             {/* 排行 */}
-            <div className="card" style={{ display: "flex", flexDirection: "column" }}>
+            <div className="card" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="card-head">
                 <h3>完成件數排行</h3>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -944,7 +935,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
             </div>
 
             {/* 已簽核明細 */}
-            <div className="card" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div className="card" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
               <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8, columnGap: 6 }}>
                 <h3 style={{ whiteSpace: "nowrap" }}>
                   已簽核明細
@@ -980,7 +971,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
                   )}
                 </div>
               </div>
-              <div className="table-wrap">
+              <div className="table-wrap dash-detail">
                 {completedView.length === 0 ? (
                   <div className="empty">查無符合條件之案件</div>
                 ) : (
@@ -1070,6 +1061,14 @@ function renderCell(b, k) {
         </span>
       : <span style={{ color: "var(--text-muted)" }}>—</span>;
     case "status":       return <StatusBadge status={b.status}/>;
+    case "note":         return b.notes
+      ? <span className="flex-row" style={{ gap: 4, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }} title={b.notes}>
+            {b.notes.length > 24 ? b.notes.slice(0, 24) + "…" : b.notes}
+          </span>
+          <CopyBtn text={b.notes} />
+        </span>
+      : <span style={{ color: "var(--text-muted)" }}>—</span>;
     case "dispatchDate": return MOCK.fmtDateShort(b.dispatchDate);
     case "signDate":     return b.signDate ? MOCK.fmtDateShort(b.signDate) : "—";
     case "cycle":        return <CycleTag disp={b.dispatchDate} sign={b.signDate}/>;

@@ -767,6 +767,18 @@ select.field-sel {
 .table-scroll {
   overflow-x: auto;
 }
+/* 已簽核明細：卡片固定高度（約 10 列），標題列固定，內部垂直 scroll */
+.dash-detail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dash-detail > .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 table.dt {
   border-collapse: separate;
   border-spacing: 0;
