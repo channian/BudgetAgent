@@ -13,6 +13,12 @@ from routes.auth import require_auth, current_user
 library_bp = Blueprint("library", __name__)
 
 DISPOSITIONS = ("通過", "退件", "不適用")
+ENTRY_CATEGORIES = ("歷史資料", "料單", "外部資料", "其他", "待定")
+
+# 16 placeholder system names (admin can rename via UI)
+_SEED_16 = [f"系統 {i:02d}" for i in range(1, 17)]
+# The 5 accidentally-seeded names from a prior migration — treat as replaceable
+_SEED_5_WRONG = {"歷史資料", "料單", "外部資料", "其他", "待定"}
 
 
 # ── Schema bootstrap ──────────────────────────────────────────────────
@@ -35,55 +41,54 @@ def init_library_schema():
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS budget.rag_entries (
-                    id          SERIAL PRIMARY KEY,
-                    system_id   INT NOT NULL REFERENCES budget.rag_systems(id) ON DELETE CASCADE,
-                    title       VARCHAR NOT NULL,
-                    keywords    TEXT,
-                    content     TEXT,
-                    example     TEXT,
-                    disposition VARCHAR,
-                    note        TEXT,
-                    created_by  VARCHAR,
-                    created_at  TIMESTAMP DEFAULT NOW(),
-                    updated_at  TIMESTAMP DEFAULT NOW()
+                    id             SERIAL PRIMARY KEY,
+                    system_id      INT NOT NULL REFERENCES budget.rag_systems(id) ON DELETE CASCADE,
+                    title          VARCHAR NOT NULL,
+                    keywords       TEXT,
+                    content        TEXT,
+                    example        TEXT,
+                    disposition    VARCHAR,
+                    note           TEXT,
+                    created_by     VARCHAR,
+                    created_at     TIMESTAMP DEFAULT NOW(),
+                    updated_at     TIMESTAMP DEFAULT NOW()
                 );
                 """
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rag_entries_system ON budget.rag_entries(system_id);"
             )
-            # idempotent migration: add expert_name if the table pre-dates this column
-            cur.execute("""
-                ALTER TABLE budget.rag_systems
-                ADD COLUMN IF NOT EXISTS expert_name VARCHAR;
-            """)
-            # Seed with 5 categories on empty table; also replace auto-generated
-            # "系統 XX" placeholders if no real entries exist yet.
-            SEED_NAMES = ["歷史資料", "料單", "外部資料", "其他", "待定"]
+            # Idempotent column migrations
+            cur.execute("ALTER TABLE budget.rag_systems ADD COLUMN IF NOT EXISTS expert_name VARCHAR;")
+            cur.execute("ALTER TABLE budget.rag_entries ADD COLUMN IF NOT EXISTS entry_category VARCHAR DEFAULT '其他';")
+
+            # ── Seeding logic ──────────────────────────────────────────
             cur.execute("SELECT COUNT(*) AS n FROM budget.rag_systems")
             total = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM budget.rag_entries")
+            has_entries = cur.fetchone()["n"] > 0
+
             if total == 0:
-                for i, name in enumerate(SEED_NAMES, 1):
+                # Fresh install — seed 16 placeholders
+                for i, name in enumerate(_SEED_16, 1):
                     cur.execute(
                         "INSERT INTO budget.rag_systems (name, sort_order) VALUES (%s, %s)",
                         (name, i),
                     )
-            else:
-                # Replace auto-generated "系統 XX" placeholders that have no entries
-                cur.execute(
-                    "SELECT COUNT(*) AS n FROM budget.rag_systems WHERE name NOT LIKE '系統 %'"
-                )
-                has_custom = cur.fetchone()["n"] > 0
-                if not has_custom:
-                    cur.execute("SELECT COUNT(*) AS n FROM budget.rag_entries")
-                    has_entries = cur.fetchone()["n"] > 0
-                    if not has_entries:
-                        cur.execute("DELETE FROM budget.rag_systems")
-                        for i, name in enumerate(SEED_NAMES, 1):
-                            cur.execute(
-                                "INSERT INTO budget.rag_systems (name, sort_order) VALUES (%s, %s)",
-                                (name, i),
-                            )
+            elif not has_entries:
+                # No real data yet — check whether current systems are all placeholders
+                cur.execute("SELECT name FROM budget.rag_systems")
+                existing = {r["name"] for r in cur.fetchall()}
+                is_all_sys_xx   = all(n.startswith("系統 ") for n in existing)
+                is_wrong_5_seed = existing == _SEED_5_WRONG
+                if is_all_sys_xx or is_wrong_5_seed:
+                    # Reset to 16 proper placeholders
+                    cur.execute("DELETE FROM budget.rag_systems")
+                    for i, name in enumerate(_SEED_16, 1):
+                        cur.execute(
+                            "INSERT INTO budget.rag_systems (name, sort_order) VALUES (%s, %s)",
+                            (name, i),
+                        )
     except Exception as e:
         # Don't crash app boot if DB is unreachable; surfaced again on first request
         print(f"[library] schema init skipped: {e}")
@@ -193,11 +198,15 @@ def delete_system(sys_id):
 @library_bp.get("/rag/systems/<int:sys_id>/entries")
 @require_auth
 def list_entries(sys_id):
-    q           = (request.args.get("q") or "").strip()
-    disposition = (request.args.get("disposition") or "").strip()
+    q              = (request.args.get("q")              or "").strip()
+    disposition    = (request.args.get("disposition")    or "").strip()
+    entry_category = (request.args.get("entry_category") or "").strip()
 
     sql    = "SELECT * FROM budget.rag_entries WHERE system_id = %s"
     params = [sys_id]
+    if entry_category:
+        sql += " AND entry_category = %s"
+        params.append(entry_category)
     if q:
         sql += " AND (title ILIKE %s OR keywords ILIKE %s OR content ILIKE %s)"
         like = f"%{q}%"
@@ -223,18 +232,21 @@ def create_entry(sys_id):
     if caller.get("role") == "viewer":
         return jsonify(error="檢視者無法新增資料"), 403
 
-    data        = request.json or {}
-    title       = (data.get("title") or "").strip()
-    keywords    = (data.get("keywords") or "").strip() or None
-    content     = (data.get("content") or "").strip() or None
-    example     = (data.get("example") or "").strip() or None
-    disposition = (data.get("disposition") or "").strip() or None
-    note        = (data.get("note") or "").strip() or None
+    data           = request.json or {}
+    title          = (data.get("title")          or "").strip()
+    keywords       = (data.get("keywords")       or "").strip() or None
+    content        = (data.get("content")        or "").strip() or None
+    example        = (data.get("example")        or "").strip() or None
+    disposition    = (data.get("disposition")    or "").strip() or None
+    note           = (data.get("note")           or "").strip() or None
+    entry_category = (data.get("entry_category") or "其他").strip()
 
     if not title:
         return jsonify(error="標題為必填"), 400
     if disposition and disposition not in DISPOSITIONS:
         return jsonify(error=f"處置必須是 {'/'.join(DISPOSITIONS)} 其中之一"), 400
+    if entry_category not in ENTRY_CATEGORIES:
+        entry_category = "其他"
 
     try:
         with db_cursor(commit=True) as cur:
@@ -243,10 +255,11 @@ def create_entry(sys_id):
                 return jsonify(error="系統類別不存在"), 404
             cur.execute(
                 """INSERT INTO budget.rag_entries
-                       (system_id, title, keywords, content, example, disposition, note, created_by)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+                       (system_id, title, keywords, content, example, disposition, note,
+                        entry_category, created_by)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
                 (sys_id, title, keywords, content, example, disposition, note,
-                 caller.get("name")),
+                 entry_category, caller.get("name")),
             )
             row = row_to_dict(cur.fetchone())
     except Exception as e:
@@ -261,27 +274,31 @@ def update_entry(entry_id):
     if caller.get("role") == "viewer":
         return jsonify(error="檢視者無法修改資料"), 403
 
-    data        = request.json or {}
-    title       = (data.get("title") or "").strip()
-    keywords    = (data.get("keywords") or "").strip() or None
-    content     = (data.get("content") or "").strip() or None
-    example     = (data.get("example") or "").strip() or None
-    disposition = (data.get("disposition") or "").strip() or None
-    note        = (data.get("note") or "").strip() or None
+    data           = request.json or {}
+    title          = (data.get("title")          or "").strip()
+    keywords       = (data.get("keywords")       or "").strip() or None
+    content        = (data.get("content")        or "").strip() or None
+    example        = (data.get("example")        or "").strip() or None
+    disposition    = (data.get("disposition")    or "").strip() or None
+    note           = (data.get("note")           or "").strip() or None
+    entry_category = (data.get("entry_category") or "其他").strip()
 
     if not title:
         return jsonify(error="標題為必填"), 400
     if disposition and disposition not in DISPOSITIONS:
         return jsonify(error=f"處置必須是 {'/'.join(DISPOSITIONS)} 其中之一"), 400
+    if entry_category not in ENTRY_CATEGORIES:
+        entry_category = "其他"
 
     try:
         with db_cursor(commit=True) as cur:
             cur.execute(
                 """UPDATE budget.rag_entries
                    SET title = %s, keywords = %s, content = %s, example = %s,
-                       disposition = %s, note = %s, updated_at = NOW()
+                       disposition = %s, note = %s, entry_category = %s, updated_at = NOW()
                    WHERE id = %s RETURNING *""",
-                (title, keywords, content, example, disposition, note, entry_id),
+                (title, keywords, content, example, disposition, note,
+                 entry_category, entry_id),
             )
             row = cur.fetchone()
             if not row:

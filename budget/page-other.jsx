@@ -1,7 +1,11 @@
 /* Library / Assignment / Permissions pages */
 
-const DISPOSITIONS = ["通過", "退件", "不適用"];
-const EMPTY_ENTRY  = { title: "", keywords: "", content: "", example: "", disposition: "", note: "" };
+const DISPOSITIONS     = ["通過", "退件", "不適用"];
+const ENTRY_CATEGORIES = ["歷史資料", "料單", "外部資料", "其他", "待定"];
+const EMPTY_ENTRY      = { title: "", keywords: "", content: "", example: "", disposition: "", note: "", entry_category: "其他" };
+
+// Icons for the 5 entry categories
+const CAT_ICONS = { "歷史資料": "📋", "料單": "📦", "外部資料": "🌐", "其他": "📁", "待定": "⏳" };
 
 function LibraryPage({ currentUser }) {
   const role    = currentUser?.role || "viewer";
@@ -149,7 +153,87 @@ function LibraryPage({ currentUser }) {
   );
 }
 
+// ── Level 2: system → 5 category blocks ──────────────────────────────
 function RagSystemDetail({ system, currentUser, onBack }) {
+  const [allEntries, setAllEntries] = React.useState([]);
+  const [loading,    setLoading]    = React.useState(true);
+  const [err,        setErr]        = React.useState("");
+  const [activeCategory, setActiveCategory] = React.useState(null);
+
+  const load = () => {
+    setLoading(true);
+    API.fetchRagEntries(system.id)
+      .then(rows => { setAllEntries(rows); setErr(""); })
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
+  };
+  React.useEffect(load, [system.id]);
+
+  // Count entries per category
+  const counts = React.useMemo(() => {
+    const acc = {};
+    ENTRY_CATEGORIES.forEach(c => { acc[c] = 0; });
+    allEntries.forEach(e => {
+      const cat = e.entry_category || "其他";
+      acc[cat] = (acc[cat] || 0) + 1;
+    });
+    return acc;
+  }, [allEntries]);
+
+  // Drill into a category
+  if (activeCategory) {
+    return (
+      <RagCategoryDetail
+        system={system}
+        category={activeCategory}
+        currentUser={currentUser}
+        onBack={() => { setActiveCategory(null); load(); }}
+      />
+    );
+  }
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <div className="flex-row" style={{ marginBottom: 8 }}>
+            <button className="btn ghost sm" onClick={onBack}><Icon.Back/>返回圖書館</button>
+            <span className="tag-sm">RAG 知識庫</span>
+          </div>
+          <h2 style={{ marginBottom: 2 }}>{system.name}</h2>
+          <div className="lede">{system.description || "點入各分類方塊以管理該類 AI 審核規則"}</div>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
+        </div>
+      </div>
+
+      {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
+
+      <div className="sys-grid" style={{ marginTop: 8 }}>
+        {ENTRY_CATEGORIES.map(cat => (
+          <div key={cat} className="sys-card" onClick={() => setActiveCategory(cat)}>
+            <div className="sys-card-top">
+              <div className="sys-av" style={{ fontSize: 22, width: 48, height: 48, borderRadius: 14 }}>
+                {CAT_ICONS[cat] || "📁"}
+              </div>
+            </div>
+            <h4 className="sys-name">{cat}</h4>
+            <div className="sys-meta">
+              {loading
+                ? <span style={{ color: "var(--text-muted)" }}>載入中…</span>
+                : <><span className="sys-count">{counts[cat] || 0}</span> 筆 RAG 資料</>
+              }
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ── Level 3: category → entry list ───────────────────────────────────
+function RagCategoryDetail({ system, category, currentUser, onBack }) {
   const role     = currentUser?.role || "viewer";
   const canWrite = role !== "viewer";
 
@@ -157,34 +241,34 @@ function RagSystemDetail({ system, currentUser, onBack }) {
   const [loading, setLoading] = React.useState(true);
   const [err,     setErr]     = React.useState("");
 
-  // filters
   const [q,    setQ]    = React.useState("");
   const [disp, setDisp] = React.useState("");
 
-  // entry modal: null | "new" | entry-object
-  const [modal,  setModal]  = React.useState(null);
-  const [form,   setForm]   = React.useState(EMPTY_ENTRY);
-  const [busy,   setBusy]   = React.useState(false);
-  const [mErr,   setMErr]   = React.useState("");
+  const [modal, setModal] = React.useState(null);
+  const [form,  setForm]  = React.useState({ ...EMPTY_ENTRY, entry_category: category });
+  const [busy,  setBusy]  = React.useState(false);
+  const [mErr,  setMErr]  = React.useState("");
 
   const load = React.useCallback(() => {
     setLoading(true);
-    API.fetchRagEntries(system.id, { q, disposition: disp })
+    API.fetchRagEntries(system.id, { entry_category: category, q, disposition: disp })
       .then(rows => { setEntries(rows); setErr(""); })
       .catch(e => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [system.id, q, disp]);
+  }, [system.id, category, q, disp]);
 
-  // Debounced reload on filter change
   React.useEffect(() => {
     const t = setTimeout(load, 250);
     return () => clearTimeout(t);
   }, [load]);
 
-  const openNew  = () => { setForm(EMPTY_ENTRY); setMErr(""); setModal("new"); };
+  const openNew  = () => { setForm({ ...EMPTY_ENTRY, entry_category: category }); setMErr(""); setModal("new"); };
   const openEdit = (en) => {
-    setForm({ title: en.title || "", keywords: en.keywords || "", content: en.content || "",
-              example: en.example || "", disposition: en.disposition || "", note: en.note || "" });
+    setForm({
+      title: en.title || "", keywords: en.keywords || "", content: en.content || "",
+      example: en.example || "", disposition: en.disposition || "", note: en.note || "",
+      entry_category: en.entry_category || category,
+    });
     setMErr(""); setModal(en);
   };
   const closeModal = () => setModal(null);
@@ -218,12 +302,12 @@ function RagSystemDetail({ system, currentUser, onBack }) {
     <>
       <div className="page-head">
         <div>
-          <div className="flex-row" style={{ marginBottom: 8 }}>
-            <button className="btn ghost sm" onClick={onBack}><Icon.Back/>返回圖書館</button>
-            <span className="tag-sm">RAG 知識庫</span>
+          <div className="flex-row" style={{ marginBottom: 8, gap: 8 }}>
+            <button className="btn ghost sm" onClick={onBack}><Icon.Back/>返回 {system.name}</button>
+            <span className="tag-sm">{CAT_ICONS[category]} {category}</span>
           </div>
-          <h2 style={{ marginBottom: 2 }}>{system.name}</h2>
-          <div className="lede">{system.description || "管理此系統的 AI 審核規則與案例，供專家建立與查詢"}</div>
+          <h2 style={{ marginBottom: 2 }}>{system.name} — {category}</h2>
+          <div className="lede">管理此系統「{category}」類別的 AI 審核規則與案例</div>
         </div>
         <div className="actions">
           <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
@@ -248,7 +332,7 @@ function RagSystemDetail({ system, currentUser, onBack }) {
       {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
 
       <div className="card">
-        <div className="card-body tight">
+        <div className="card-body tight" style={{ maxHeight: 520, overflowY: "auto" }}>
           {loading ? (
             <div className="empty">載入中…</div>
           ) : entries.length === 0 ? (
@@ -316,16 +400,22 @@ function RagSystemDetail({ system, currentUser, onBack }) {
               </div>
               <div className="field-row two">
                 <div className="field">
+                  <label>分類</label>
+                  <select value={form.entry_category} onChange={e => set("entry_category", e.target.value)}>
+                    {ENTRY_CATEGORIES.map(c => <option key={c} value={c}>{CAT_ICONS[c]} {c}</option>)}
+                  </select>
+                </div>
+                <div className="field">
                   <label>建議處置</label>
                   <select value={form.disposition} onChange={e => set("disposition", e.target.value)}>
                     <option value="">— 不指定 —</option>
                     {DISPOSITIONS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
-                <div className="field">
-                  <label>備註 <span className="opt">(選填)</span></label>
-                  <input type="text" value={form.note} onChange={e => set("note", e.target.value)} placeholder="其他補充"/>
-                </div>
+              </div>
+              <div className="field">
+                <label>備註 <span className="opt">(選填)</span></label>
+                <input type="text" value={form.note} onChange={e => set("note", e.target.value)} placeholder="其他補充"/>
               </div>
               {mErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {mErr}</div>}
               <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8 }}>

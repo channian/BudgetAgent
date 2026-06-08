@@ -356,11 +356,13 @@ async function apiFetchRagEntries(sysId, filters = {}) {
   return d.entries || [];
 }
 async function apiCreateRagEntry(sysId, form) {
-  const d = await apiFetch(`/api/rag/systems/${sysId}/entries`, { method: "POST", body: JSON.stringify(form) });
+  const payload = { ...form, entry_category: form.entry_category || "其他" };
+  const d = await apiFetch(`/api/rag/systems/${sysId}/entries`, { method: "POST", body: JSON.stringify(payload) });
   return d.entry;
 }
 async function apiUpdateRagEntry(entryId, form) {
-  const d = await apiFetch(`/api/rag/entries/${entryId}`, { method: "PUT", body: JSON.stringify(form) });
+  const payload = { ...form, entry_category: form.entry_category || "其他" };
+  const d = await apiFetch(`/api/rag/entries/${entryId}`, { method: "PUT", body: JSON.stringify(payload) });
   return d.entry;
 }
 async function apiDeleteRagEntry(entryId) {
