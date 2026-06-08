@@ -360,7 +360,7 @@ def test_ad_login():
 
     try:
         from ldap3 import (Server, Connection, Tls,
-                           NTLM, SIMPLE, ENCRYPT, NONE as LDAP_NONE)
+                           NTLM, SIMPLE, NONE as LDAP_NONE)
         from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
     except ImportError as e:
         return jsonify(error=f"ldap3 not installed: {e}"), 500
@@ -385,7 +385,7 @@ def test_ad_login():
             user=user_upn, authentication=SIMPLE)),
         ("NTLM sealed/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
-            user=user_nt, authentication=NTLM, session_security=ENCRYPT)),
+            user=user_nt, authentication=NTLM, session_security="ENCRYPT")),
         ("NTLM plain/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
             user=user_nt, authentication=NTLM)),

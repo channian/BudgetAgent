@@ -24,7 +24,7 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
     """
     try:
         from ldap3 import (Server, Connection, Tls,
-                           NTLM, SIMPLE, SUBTREE, ENCRYPT, NONE as LDAP_NONE)
+                           NTLM, SIMPLE, SUBTREE, NONE as LDAP_NONE)
         from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
     except ImportError as e:
         logger.warning("[AD] import failed (ldap3 not installed?): %s", e)
@@ -49,7 +49,7 @@ def ad_authenticate(username: str, password: str) -> Optional[dict]:
         # NTLM with sealing — satisfies "require signing" DCs
         ("NTLM sealed/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
-            user=user_nt, authentication=NTLM, session_security=ENCRYPT)),
+            user=user_nt, authentication=NTLM, session_security="ENCRYPT")),
         # Plain NTLM
         ("NTLM plain/389", dict(
             server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
