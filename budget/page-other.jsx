@@ -444,6 +444,9 @@ function AssignmentPage({ currentUser }) {
   const [doneInfo,    setDoneInfo]    = React.useState({});   // {dbId: updatedBudget}
   const [errMsg,      setErrMsg]      = React.useState({});
 
+  // 已派發 search filter
+  const [dispatchFilter, setDispatchFilter] = React.useState("");
+
   // Reassign state
   const [reassignBudget, setReassignBudget] = React.useState(null);
   const [reassignForm,   setReassignForm]   = React.useState({ expert_name: "", reason: "" });
@@ -660,7 +663,21 @@ function AssignmentPage({ currentUser }) {
       <div className="card">
         <div className="card-head">
           <h3>已派發案件</h3>
-          <span className="hint">{dispatched.length} 件</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="search" style={{ width: 220 }}>
+              <Icon.Search/>
+              <input
+                value={dispatchFilter}
+                onChange={e => setDispatchFilter(e.target.value)}
+                placeholder="篩選案件名稱…"
+              />
+            </div>
+            <span className="hint">
+              {dispatchFilter
+                ? `${dispatched.filter(b => b.project.toLowerCase().includes(dispatchFilter.toLowerCase())).length} / ${dispatched.length} 件`
+                : `${dispatched.length} 件`}
+            </span>
+          </div>
         </div>
         <div className="card-body tight" style={{ maxHeight: 480, overflowY: "auto" }}>
           {dispatched.length === 0 ? (
@@ -676,7 +693,9 @@ function AssignmentPage({ currentUser }) {
                 <div>狀態</div>
                 <div style={{ textAlign: "right" }}>操作</div>
               </div>
-              {dispatched.map(b => (
+              {dispatched.filter(b =>
+                !dispatchFilter || b.project.toLowerCase().includes(dispatchFilter.toLowerCase())
+              ).map(b => (
                 <div key={b.dbId} className="sent-row">
                   <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
                   <div className="nm" title={b.project}>{b.project}</div>
@@ -828,7 +847,7 @@ function PermissionsPage({ currentUser }) {
 
       {/* ── User table ── */}
       <div className="card">
-        <div className="card-body tight">
+        <div className="card-body tight" style={{ maxHeight: 480, overflowY: "auto" }}>
           <div className="user-row head">
             <div>姓名</div>
             <div>AD 帳號</div>
@@ -1036,7 +1055,7 @@ function ActivityPage() {
           <h3>使用者登入紀錄</h3>
           <span className="hint">{users.length} 位使用者</span>
         </div>
-        <div className="card-body tight">
+        <div className="card-body tight" style={{ maxHeight: 480, overflowY: "auto" }}>
           {loading ? (
             <div className="empty">載入中…</div>
           ) : users.length === 0 ? (
