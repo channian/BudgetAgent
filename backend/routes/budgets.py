@@ -257,7 +257,7 @@ def update_budget(budget_id):
     data = request.json or {}
     user = current_user()
 
-    allowed = {"expert_name", "owner", "amount", "category", "sub_category", "note",
+    allowed = {"budget_no", "expert_name", "owner", "amount", "category", "sub_category", "note",
                "expert_comment", "expert_decision"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:

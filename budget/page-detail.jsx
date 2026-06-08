@@ -10,7 +10,7 @@ const ACTION_LABELS = {
   SLA_REMINDER:          "SLA 催辦",
 };
 
-function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onDelete, onEdit, currentUser }) {
+function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onDelete, onEdit, currentUser, fromRoute }) {
   const [comment,  setComment]  = React.useState(budget.expertComment || "");
   const [decision, setDecision] = React.useState(budget.expertResult);
   const [timeline, setTimeline] = React.useState([]);
@@ -39,7 +39,8 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
 
   const lockBusy      = needsLock && lockState === "busy";
   const lockedByOther = needsLock && lockState && lockState !== "busy" && !lockState.ok;
-  const canReview = isOpen && role === "expert" && !lockBusy && !lockedByOther;
+  // Expert can only fill in review when arriving from the 待專家審核 tab
+  const canReview = isOpen && role === "expert" && fromRoute === "expert_review" && !lockBusy && !lockedByOther;
   const canSign   = isOpen && (role === "admin" || role === "boss");
 
   const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
@@ -239,7 +240,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
                     )}
                     <span className="spacer-x" />
                     <span className="hint">
-                      {canSign ? "簽核後不可變更，將同步至 ERP" : "儲存後將送交 boss / 管理員簽核"}
+                      {canSign ? "簽核後不可變更，將同步至 ERP" : "儲存後案件自動進入待簽核，由 boss / 管理員最終簽核"}
                     </span>
                   </div>
                 </>

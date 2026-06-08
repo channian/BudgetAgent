@@ -172,7 +172,7 @@ function fmtAmount(n) {
   return new Intl.NumberFormat("zh-TW").format(n);
 }
 
-function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collapsed, onToggleCollapse }) {
+function Sidebar({ route, setRoute, pendingCount, expertReviewCount, fromRoute, width, onResize, user, collapsed, onToggleCollapse }) {
   const role = user?.role || "viewer";
 
   // Change-password modal
@@ -202,12 +202,13 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
   };
 
   const allItems = [
-    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,    count: pendingCount, dot: true,  roles: ["admin","boss","expert","viewer"] },
-    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                          roles: ["admin","boss","expert","viewer"] },
-    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                           roles: ["admin","boss","expert","viewer"] },
-    { id: "assignment",  label: "派發中心人員設定",  icon: <Icon.Users />,                          roles: ["admin"] },
-    { id: "permissions", label: "權限管理中心",      icon: <Icon.Shield />,                         roles: ["admin"] },
-    { id: "activity",    label: "使用狀況",          icon: <Icon.Activity />,                       roles: ["admin"] },
+    { id: "pending",       label: "待簽核",          icon: <Icon.Inbox />,    count: pendingCount,      dot: true, roles: ["admin","boss","expert","viewer"] },
+    { id: "expert_review", label: "待專家審核",       icon: <Icon.Users />,   count: expertReviewCount, dot: true, roles: ["admin","boss","expert","viewer"] },
+    { id: "approved",      label: "已簽核完成",       icon: <Icon.Check />,                              roles: ["admin","boss","expert","viewer"] },
+    { id: "library",       label: "AI Agent 圖書館",  icon: <Icon.Book />,                               roles: ["admin","boss","expert","viewer"] },
+    { id: "assignment",    label: "派發中心人員設定",  icon: <Icon.Shield />,                             roles: ["admin"] },
+    { id: "permissions",   label: "權限管理中心",      icon: <Icon.Shield />,                             roles: ["admin"] },
+    { id: "activity",      label: "使用狀況",          icon: <Icon.Activity />,                           roles: ["admin"] },
   ];
 
   const items = allItems.filter(it => it.roles.includes(role));
@@ -255,7 +256,9 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
       {!narrow && <div className="sidebar-section">主功能</div>}
       <nav className="sidebar-nav">
         {items.map((it) => {
-          const active = route === it.id || it.id === "pending" && (route === "detail" || route === "edit" || route === "new");
+          const active = route === it.id
+            || (it.id === "pending"       && (route === "edit" || route === "new" || (route === "detail" && fromRoute === "pending")))
+            || (it.id === "expert_review" && route === "detail" && fromRoute === "expert_review");
           return (
             <div key={it.id} className={`nav-item ${active ? "active" : ""}`} onClick={() => setRoute(it.id)} title={narrow ? it.label : ""}>
               <span className="icon">{it.icon}</span>

@@ -1,4 +1,4 @@
-/* Budget list page — resizable columns, two-block pending view */
+/* Budget list page — pending / expert_review / approved scopes */
 
 const DEFAULT_COLS = [
   { k: "week",        label: "週數",         w: 78,  sortable: true,  min: 60 },
@@ -16,6 +16,30 @@ const DEFAULT_COLS = [
   { k: "dispatchDate",label: "派送日期",     w: 130, sortable: true, min: 110 },
   { k: "signDate",    label: "簽核日期",     w: 130, min: 110 },
   { k: "cycle",       label: "Cycle Time",   w: 110, min: 90 },
+];
+
+// Columns shown in the 待專家審核 tab
+const EXPERT_COLS = [
+  { k: "week",        label: "週數",         w: 78,  sortable: true, min: 60 },
+  { k: "category",    label: "類別",         w: 130, min: 100 },
+  { k: "subCategory", label: "系統",         w: 130, min: 100 },
+  { k: "project",     label: "項目名稱",     w: 300, min: 180 },
+  { k: "expertName",  label: "負責專家",     w: 130, min: 100 },
+  { k: "amount",      label: "金額 (NT$)",   w: 130, sortable: true, min: 110, align: "right" },
+  { k: "aiResult",    label: "AI 初審結果",  w: 260, min: 200 },
+  { k: "status",      label: "狀態",         w: 110, min: 90 },
+  { k: "dispatchDate",label: "派送日期",     w: 130, sortable: true, min: 110 },
+];
+
+// Columns shown for AI_REVIEW block on main page
+const AI_REVIEW_COLS = [
+  { k: "week",        label: "週數",         w: 78,  sortable: true, min: 60 },
+  { k: "category",    label: "類別",         w: 130, min: 100 },
+  { k: "subCategory", label: "系統",         w: 130, min: 100 },
+  { k: "project",     label: "項目名稱",     w: 300, min: 180 },
+  { k: "amount",      label: "金額 (NT$)",   w: 130, sortable: true, min: 110, align: "right" },
+  { k: "aiResult",    label: "AI 初審結果",  w: 260, min: 200 },
+  { k: "budgetNoEdit",label: "預算單號",     w: 200, min: 160 },
 ];
 
 const PENDING_STATUSES   = ["AI_REVIEW", "EXPERT_REVIEW", "PENDING_ACTION"];
@@ -41,11 +65,60 @@ function CopyBtn({ text }) {
   );
 }
 
-// Shared data table — optional checkbox + sign-off action columns
+// Inline budget_no editor (used in AI_REVIEW block on main page)
+function BudgetNoCell({ dbId, value, onSaved }) {
+  const [editing, setEditing] = React.useState(false);
+  const [val, setVal]         = React.useState(value || "");
+  const [saving, setSaving]   = React.useState(false);
+
+  const save = async (e) => {
+    e && e.stopPropagation();
+    setSaving(true);
+    try {
+      await API.saveBudgetNo(dbId, val);
+      onSaved(val);
+      setEditing(false);
+    } catch (err) {
+      Toast.show("儲存失敗：" + err.message, "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) return (
+    <span style={{ display: "flex", gap: 4, alignItems: "center" }} onClick={e => e.stopPropagation()}>
+      <input
+        autoFocus
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+        style={{ width: 120, fontSize: 12, padding: "2px 6px", border: "1px solid var(--accent)", borderRadius: 4 }}
+        disabled={saving}
+      />
+      <button className="btn-approve-sm" onClick={save} disabled={saving}>✓</button>
+      <button style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--text-muted)" }} onClick={e => { e.stopPropagation(); setEditing(false); }}>✕</button>
+    </span>
+  );
+
+  return (
+    <span
+      style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}
+      onClick={e => { e.stopPropagation(); setEditing(true); }}
+      title="點擊填入預算單號"
+    >
+      <span className={val ? "mono" : ""} style={{ fontSize: 12, color: val ? "var(--accent-strong)" : "var(--text-muted)" }}>
+        {val || "點擊填入…"}
+      </span>
+      <span style={{ fontSize: 10, color: "var(--text-subtle)", opacity: 0.7 }}>✎</span>
+    </span>
+  );
+}
+
+// Shared data table
 function BudgetTable({
   cols, rows, onRow, sort, toggleSort, arr, startColResize, setCols,
   showSelect, selected, onToggleRow, onToggleAll, allSelected, someSelected,
-  showSign, onSign,
+  showSign, onSign, onBudgetNoSaved,
 }) {
   const chkW = 36, actW = 96;
   const extraW = (showSelect ? chkW : 0) + (showSign ? actW : 0);
@@ -87,7 +160,7 @@ function BudgetTable({
                     onClick={(e) => e.stopPropagation()}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      setCols((cs) => cs.map((col, i) => i === idx ? { ...col, w: DEFAULT_COLS[idx].w } : col));
+                      setCols((cs) => cs.map((col, i) => i === idx ? { ...col, w: DEFAULT_COLS[idx]?.w || col.w } : col));
                     }}
                     title="拖曳調整欄寬，雙擊重設"
                   />
@@ -99,12 +172,11 @@ function BudgetTable({
         </thead>
         <tbody>
           {rows.map((b) => (
-            <tr key={b.id} onClick={() => {
-              // 若使用者正在選取文字（要手動複製），不要導航到詳情頁，以免選取被清除
+            <tr key={b.dbId} onClick={() => {
               const sel = window.getSelection && window.getSelection();
               if (sel && sel.type === "Range" && String(sel).trim().length > 0) return;
               onRow(b);
-            }} className={showSelect && selected.has(b.dbId) ? "row-selected" : ""}>
+            }} className={showSelect && selected && selected.has(b.dbId) ? "row-selected" : ""}>
               {showSelect && (
                 <td className="col-chk" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={selected.has(b.dbId)} onChange={() => onToggleRow(b.dbId)} />
@@ -115,7 +187,10 @@ function BudgetTable({
                   c.k === "amount" ? "col-amt" :
                   (c.k === "dispatchDate" || c.k === "signDate") ? "col-date" : ""
                 }>
-                  {renderCell(b, c.k)}
+                  {c.k === "budgetNoEdit"
+                    ? <BudgetNoCell dbId={b.dbId} value={b.budgetNo} onSaved={(v) => onBudgetNoSaved && onBudgetNoSaved(b.dbId, v)} />
+                    : renderCell(b, c.k)
+                  }
                 </td>
               ))}
               {showSign && (
@@ -134,27 +209,34 @@ function BudgetTable({
 }
 
 function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUser, onSign }) {
-  const isPending = scope === "pending";
-  const role      = currentUser?.role || "viewer";
-  const isViewer  = role === "viewer";
-  const isAdmin   = role === "admin";
-  const canSign   = role === "admin" || role === "boss";
+  const isPending      = scope === "pending";
+  const isExpertReview = scope === "expert_review";
+  const isCompleted    = scope === "approved";
+  const role    = currentUser?.role || "viewer";
+  const isAdmin = role === "admin";
+  const canSign = role === "admin" || role === "boss";
 
-  const filtered = budgets.filter((b) =>
-    isPending ? PENDING_STATUSES.includes(b.status)
-              : COMPLETED_STATUSES.includes(b.status)
-  );
+  const allPending = budgets.filter(b => PENDING_STATUSES.includes(b.status));
+  const completed  = budgets.filter(b => COMPLETED_STATUSES.includes(b.status));
 
-  const [q, setQ] = React.useState("");
+  const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
+
+  // Split pending into three groups
+  const aiReviewCases  = allPending.filter(b => b.status === "AI_REVIEW");
+  const readyToSign    = allPending.filter(b => b.status !== "AI_REVIEW" && hasComment(b));
+  const awaitingExpert = allPending.filter(b => b.status !== "AI_REVIEW" && !hasComment(b));
+
+  const [q, setQ]           = React.useState("");
   const [aiFilter, setAiFilter] = React.useState("all");
-  const [sort, setSort] = React.useState({ k: "dispatchDate", dir: "desc" });
-  const [cols, setCols] = React.useState(DEFAULT_COLS);
+  const [sort, setSort]     = React.useState({ k: "dispatchDate", dir: "desc" });
+  const [cols, setCols]     = React.useState(DEFAULT_COLS);
   const [selected, setSelected] = React.useState(new Set());
   const [batchBusy, setBatchBusy] = React.useState(false);
-  const [dispatchBusy, setDispatchBusy] = React.useState(false);
 
-  // Export / import
-  const exportScope = isPending ? "pending" : "completed";
+  // budgetNo overrides: {dbId: newBudgetNo} for optimistic UI update in AI_REVIEW block
+  const [budgetNoOverrides, setBudgetNoOverrides] = React.useState({});
+
+  const exportScope = isPending || isExpertReview ? "pending" : "completed";
   const fileRef = React.useRef(null);
   const [busy, setBusy] = React.useState("");
 
@@ -226,13 +308,12 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   };
   const arr = (k) => sort.k === k ? (sort.dir === "asc" ? "▲" : "▼") : "▾";
 
-  // Apply search + AI filter + sort to a list
   const applyView = React.useCallback((list) => {
     let r = list;
     if (q.trim()) {
       const s = q.trim().toLowerCase();
       r = r.filter((b) =>
-        b.id.toLowerCase().includes(s) ||
+        (b.budgetNo || b.id || "").toLowerCase().includes(s) ||
         b.project.toLowerCase().includes(s) ||
         b.owner.name.includes(q) ||
         (b.expertName || "").includes(q) ||
@@ -249,24 +330,17 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     });
   }, [q, aiFilter, sort]);
 
-  const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
+  const readyToSignView   = React.useMemo(() => applyView(readyToSign),    [applyView, budgets]);
+  const awaitingExpertView= React.useMemo(() => applyView(awaitingExpert), [applyView, budgets]);
+  const aiReviewView      = React.useMemo(() => applyView(aiReviewCases),  [applyView, budgets]);
+  const completedView     = React.useMemo(() => applyView(completed),       [applyView, budgets]);
 
-  // ── Pending: split into blocks ──
-  const aiCases = filtered.filter((b) => b.status === "AI_REVIEW");           // 待派發 (only counted here)
-  const dispatchedPending = filtered.filter((b) => b.status !== "AI_REVIEW"); // EXPERT_REVIEW / PENDING_ACTION
-  const needSignRaw   = dispatchedPending.filter(hasComment);    // 待簽核
-  const needExpertRaw = dispatchedPending.filter((b) => !hasComment(b)); // 待專家簽核
-
-  const needSign   = React.useMemo(() => applyView(needSignRaw),   [applyView, budgets]);
-  const needExpert = React.useMemo(() => applyView(needExpertRaw), [applyView, budgets]);
-  const completedRows = React.useMemo(() => applyView(filtered), [applyView, budgets]);
-
-  // ── Batch sign (待簽核 block) ──
-  const selectableIds = needSign.map((b) => b.dbId);
-  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  // Batch sign
+  const selectableIds = readyToSignView.map((b) => b.dbId);
+  const allSelected  = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
   const someSelected = selectableIds.some((id) => selected.has(id));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableIds));
-  const toggleRow = (dbId) => setSelected((prev) => {
+  const toggleAll    = () => setSelected(allSelected ? new Set() : new Set(selectableIds));
+  const toggleRow    = (dbId) => setSelected((prev) => {
     const next = new Set(prev);
     next.has(dbId) ? next.delete(dbId) : next.add(dbId);
     return next;
@@ -279,9 +353,9 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const batchSign = async () => {
     if (!selected.size) return;
-    const toSign = needSign.filter((b) => selected.has(b.dbId));
+    const toSign = readyToSignView.filter((b) => selected.has(b.dbId));
     if (!toSign.length) return;
-    if (!confirm(`確定一鍵簽核 ${toSign.length} 件案件？此操作為全有全無，任一筆失敗將全部取消。`)) return;
+    if (!confirm(`確定一鍵簽核 ${toSign.length} 件案件？`)) return;
     setBatchBusy(true);
     try {
       const res = await API.batchSign(toSign.map((b) => b.dbId));
@@ -295,63 +369,33 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     }
   };
 
-  // ── One-click dispatch (admin) ──
-  const dispatchAll = async () => {
-    const withExpert = aiCases.filter((b) => b.expertName);
-    const without = aiCases.length - withExpert.length;
-    if (!withExpert.length) {
-      alert("沒有可派發的案件（需先在派發中心為案件指定負責專家）");
-      return;
-    }
-    if (!confirm(`將派發 ${withExpert.length} 件案件給各自的負責專家${without ? `（${without} 件未指定專家，將略過）` : ""}。確定？`)) return;
-    setDispatchBusy(true);
-    let sent = 0, noEmail = 0, failed = 0;
-    for (const b of withExpert) {
-      try {
-        const { emailStatus } = await API.dispatch(b.dbId, { expert_name: b.expertName });
-        if (emailStatus === "sent") sent++;
-        else if (emailStatus === "no_email") noEmail++;
-        else if (emailStatus === "failed" || emailStatus === "error") failed++;
-      } catch {}
-    }
-    setDispatchBusy(false);
-    onRefresh && onRefresh();
-    const parts = [];
-    if (sent)    parts.push(`✅ ${sent} 件 Email 已寄出`);
-    if (noEmail) parts.push(`⚠ ${noEmail} 件找不到信箱`);
-    if (failed)  parts.push(`❌ ${failed} 件寄送失敗`);
-    if (parts.length) Toast.show(parts.join("　"), sent && !failed ? "ok" : "warn", 6000);
-  };
-
-  // KPIs (over all pending display rows)
-  const allDisplay = isPending ? [...needSign, ...needExpert] : completedRows;
-  const totalAmt = allDisplay.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  // KPI counts
+  const allDisplay  = isCompleted ? completedView : isPending ? [...aiReviewView, ...readyToSignView] : awaitingExpertView;
+  const totalAmt    = allDisplay.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const aiApprovedCnt = allDisplay.filter((b) => b.aiResult === "approve").length;
-  const overSLA = allDisplay.filter((b) => {
+  const overSLA     = allDisplay.filter((b) => {
     if (!PENDING_STATUSES.includes(b.status)) return false;
-    return (new Date() - b.dispatchDate) / 86400000 > 3;
+    return (new Date() - new Date(b.dispatchDate)) / 86400000 > 3;
   }).length;
 
   const tableProps = { cols, sort, toggleSort, arr, startColResize, setCols, onRow };
+
+  const pageTitle = isPending ? "待簽核案件" : isExpertReview ? "待專家審核案件" : "已簽核完成案件";
+  const pageLede  = isPending
+    ? "AI 初審完成後在此查看與處理；派發後等待專家評論，評論完成後簽核結案"
+    : isExpertReview
+    ? "已派發、等待專家填寫評論；填寫完成後案件自動進入待簽核佇列"
+    : "已完成完整審核流程之預算案件，可匯出稽核紀錄";
 
   return (
     <>
       <div className="page-head">
         <div>
-          <h2>{isPending ? "待簽核案件" : "已簽核完成案件"}</h2>
-          <div className="lede">
-            {isPending
-              ? "專家完成評論後進入待簽核，由 boss / 系統管理員簽核結案"
-              : "已完成完整審核流程之預算案件，可匯出稽核紀錄"}
-          </div>
+          <h2>{pageTitle}</h2>
+          <div className="lede">{pageLede}</div>
         </div>
         <div className="actions">
           <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
-          {isPending && isAdmin && aiCases.length > 0 && (
-            <button className="btn" onClick={dispatchAll} disabled={dispatchBusy}>
-              <Icon.Upload/>{dispatchBusy ? "派發中…" : `一鍵派發 (${aiCases.length})`}
-            </button>
-          )}
           <button className="btn" onClick={() => doExport("xlsx")} disabled={busy === "xlsx"}>
             <Icon.Download/>{busy === "xlsx" ? "匯出中…" : "匯出 XLSX"}
           </button>
@@ -359,7 +403,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
             <Icon.Upload/>{busy === "import" ? "匯入中…" : "匯入 CSV/XLSX"}
           </button>
           <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImport} />
-          {isPending && !isViewer && (
+          {isPending && isAdmin && (
             <button className="btn accent" onClick={onNew}><Icon.Plus/>建立預算單</button>
           )}
         </div>
@@ -368,9 +412,12 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       <div className="kpi-row">
         <div className="kpi k-blue">
           <div className="glyph"><Icon.Inbox s={18}/></div>
-          <div className="lbl">{isPending ? "待處理案件" : "近 30 日已核可"}</div>
+          <div className="lbl">{isCompleted ? "近 30 日已核可" : isPending ? "待處理案件" : "待審核案件"}</div>
           <div className="val tnum">{allDisplay.length}<small>件</small></div>
-          <div className="delta up">{isPending ? `待簽核 ${needSign.length} · 待評論 ${needExpert.length}` : "已結案"}</div>
+          <div className="delta up">
+            {isPending ? `待派發 ${aiReviewView.length} · 待簽核 ${readyToSignView.length}` :
+             isExpertReview ? `待評論 ${awaitingExpertView.length}` : "已結案"}
+          </div>
         </div>
         <div className="kpi k-purple">
           <div className="glyph"><Icon.Sparkles s={18}/></div>
@@ -413,20 +460,48 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         )}
       </div>
 
-      {isPending ? (
+      {/* ── 待簽核 main page ── */}
+      {isPending && (
         <>
-          {/* ── 待簽核 (專家已評論) ── */}
-          <div className="block-head">
+          {/* AI_REVIEW block — admin fills budget_no here */}
+          {aiReviewView.length > 0 && (
+            <>
+              <div className="block-head">
+                <h3>待派發案件 <span className="block-tag">AI 初審完成，請填入預算單號後至派發中心派發</span></h3>
+                <span className="hint">{aiReviewView.length} 件</span>
+              </div>
+              <div className="table-wrap">
+                <BudgetTable
+                  cols={AI_REVIEW_COLS}
+                  rows={aiReviewView}
+                  onRow={onRow}
+                  sort={sort} toggleSort={toggleSort} arr={arr}
+                  startColResize={(idx, e) => {
+                    // use local resize for AI_REVIEW_COLS
+                    e.preventDefault(); e.stopPropagation();
+                  }}
+                  setCols={() => {}}
+                  onBudgetNoSaved={(dbId, val) => {
+                    setBudgetNoOverrides(prev => ({ ...prev, [dbId]: val }));
+                    Toast.show(`✅ 預算單號已儲存`, "ok");
+                  }}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Ready-to-sign block */}
+          <div className="block-head" style={{ marginTop: aiReviewView.length > 0 ? 22 : 0 }}>
             <h3>待簽核 <span className="block-tag">專家評論完成，待 boss / 管理員簽核</span></h3>
-            <span className="hint">{needSign.length} 件</span>
+            <span className="hint">{readyToSignView.length} 件</span>
           </div>
           <div className="table-wrap">
-            {needSign.length === 0 ? (
+            {readyToSignView.length === 0 ? (
               <div className="empty">目前沒有待簽核案件</div>
             ) : (
               <BudgetTable
                 {...tableProps}
-                rows={needSign}
+                rows={readyToSignView}
                 showSelect={canSign}
                 selected={selected} onToggleRow={toggleRow} onToggleAll={toggleAll}
                 allSelected={allSelected} someSelected={someSelected}
@@ -434,26 +509,33 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
               />
             )}
           </div>
-
-          {/* ── 待專家簽核 (專家尚未評論) ── */}
-          <div className="block-head" style={{ marginTop: 22 }}>
-            <h3>待專家簽核的案件 <span className="block-tag">已派發，等待專家填寫評論</span></h3>
-            <span className="hint">{needExpert.length} 件</span>
-          </div>
-          <div className="table-wrap">
-            {needExpert.length === 0 ? (
-              <div className="empty">目前沒有待專家評論案件</div>
-            ) : (
-              <BudgetTable {...tableProps} rows={needExpert} />
-            )}
-          </div>
         </>
-      ) : (
+      )}
+
+      {/* ── 待專家審核 page ── */}
+      {isExpertReview && (
         <div className="table-wrap">
-          {completedRows.length === 0 ? (
+          {awaitingExpertView.length === 0 ? (
+            <div className="empty">🎉 目前沒有待審核案件</div>
+          ) : (
+            <BudgetTable
+              cols={EXPERT_COLS}
+              rows={awaitingExpertView}
+              onRow={onRow}
+              sort={sort} toggleSort={toggleSort} arr={arr}
+              startColResize={startColResize} setCols={setCols}
+            />
+          )}
+        </div>
+      )}
+
+      {/* ── 已簽核完成 page ── */}
+      {isCompleted && (
+        <div className="table-wrap">
+          {completedView.length === 0 ? (
             <div className="empty">查無符合條件之案件</div>
           ) : (
-            <BudgetTable {...tableProps} rows={completedRows} />
+            <BudgetTable {...tableProps} rows={completedView} />
           )}
         </div>
       )}

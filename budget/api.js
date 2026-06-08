@@ -248,6 +248,13 @@ async function apiSaveReview(dbId, { comment, decision }) {
   });
   return dbToFrontend(d.budget);
 }
+async function apiSaveBudgetNo(dbId, budgetNo) {
+  const d = await apiFetch(`/api/budgets/${dbId}`, {
+    method: "PUT",
+    body: JSON.stringify({ budget_no: budgetNo || null }),
+  });
+  return dbToFrontend(d.budget);
+}
 async function apiDispatchBudget(dbId, form) {
   const d = await apiFetch(`/api/budgets/${dbId}/dispatch`, {
     method: "POST",
@@ -395,6 +402,7 @@ window.API = {
   deleteBudget:        apiDeleteBudget,
   resubmit:            apiResubmitBudget,
   saveReview:          apiSaveReview,
+  saveBudgetNo:        apiSaveBudgetNo,
   dispatch:            apiDispatchBudget,
   fetchTimeline:       apiFetchTimeline,
   batchSign:           apiBatchSign,

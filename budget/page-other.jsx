@@ -428,7 +428,7 @@ function AssignmentPage() {
       <div className="page-head">
         <div>
           <h2>派發中心</h2>
-          <div className="lede">為 AI 初審完成的案件填入預算單號與負責專家，派發後進入專家審核流程</div>
+          <div className="lede">為 AI 初審完成的案件指定負責專家並派發；預算單號請至主畫面（待簽核）填入</div>
         </div>
         <div className="actions">
           <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
@@ -459,7 +459,6 @@ function AssignmentPage() {
                 <div>項目名稱</div>
                 <div>類別</div>
                 <div>金額</div>
-                <div>預算單號</div>
                 <div>負責專家</div>
                 <div></div>
               </div>
@@ -476,15 +475,6 @@ function AssignmentPage() {
                     <div><CategoryChip id={b.categoryId} name={b.category}/></div>
                     <div className="mono" style={{ textAlign: "right", fontSize: 12.5 }}>
                       NT$ {fmtAmount(b.amount)}
-                    </div>
-                    <div>
-                      <input
-                        className="cell-input"
-                        placeholder="填入預算單號"
-                        value={f.budget_no || ""}
-                        onChange={e => setField(b.dbId, "budget_no", e.target.value)}
-                        disabled={isDone || isBusy}
-                      />
                     </div>
                     <div>
                       {experts.length > 0 ? (
