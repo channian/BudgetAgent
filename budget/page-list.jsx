@@ -42,18 +42,17 @@ const AI_REVIEW_COLS = [
   { k: "budgetNoEdit",label: "預算單號",     w: 200, min: 160 },
 ];
 
-// Columns shown in 已簽核明細 — order/labels mirror the import Excel:
-// 週數(w), 類別, BudgetNo., Project Name, 目前關卡, 預算負責人, 金額,
-// 專家評論, 審核處置, 派送日期, 簽核日期, Cycle time, 備註
+// Columns shown in 已簽核明細 — order/labels mirror the import Excel.
+// (「目前關卡」忽略；Excel 的「Owner」欄 = 負責專家 expert_name)
 const COMPLETED_COLS = [
-  { k: "week",         label: "週數(w)",     w: 80,  sortable: true, min: 60 },
+  { k: "week",         label: "週數(w)",      w: 80,  sortable: true, min: 60 },
   { k: "category",     label: "類別",         w: 120, min: 90 },
   { k: "id",           label: "BudgetNo.",    w: 150, min: 120 },
   { k: "project",      label: "Project Name", w: 240, min: 160 },
-  { k: "status",       label: "目前關卡",     w: 110, min: 90 },
   { k: "owner",        label: "預算負責人",   w: 130, min: 100 },
   { k: "amount",       label: "金額 (NT$)",   w: 130, sortable: true, min: 110, align: "right" },
   { k: "expertComment",label: "專家評論",     w: 200, min: 140 },
+  { k: "expertName",   label: "負責專家 (Owner)", w: 140, min: 100 },
   { k: "expertResult", label: "審核處置",     w: 110, min: 90 },
   { k: "dispatchDate", label: "派送日期",     w: 120, sortable: true, min: 100 },
   { k: "signDate",     label: "簽核日期",     w: 120, min: 100 },

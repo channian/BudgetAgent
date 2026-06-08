@@ -942,9 +942,10 @@ COMPLETED_IMPORT_ALIASES = {
     "week":            ["週數(w)", "週數", "week", "Week"],
     "category":        ["類別", "category", "判定類別"],
     "sub_category":    ["系統", "判定系統", "sub_category", "Sub Category"],
-    "expert_name":     ["負責專家", "Expert", "expert_name"],
+    # Excel 的「Owner」欄存的是負責專家，對應 expert_name（非 owner）
+    "expert_name":     ["負責專家", "Owner", "Expert", "expert_name"],
     "budget_no":       ["BudgetNo.", "BudgetNo", "Budget No.", "預算單號", "budget_no"],
-    "owner":           ["預算負責人", "Owner", "owner", "負責人"],
+    "owner":           ["預算負責人", "owner", "負責人"],
     "amount":          ["金額", "amount", "金額 (NT$)"],
     "expert_comment":  ["專家評論", "expert_comment"],
     "expert_decision": ["審核處置", "expert_decision"],
