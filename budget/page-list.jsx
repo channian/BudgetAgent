@@ -770,6 +770,36 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       {/* ── 待簽核 main page ── */}
       {isPending && (
         <>
+          {/* AI_REVIEW cases — visible to all, actionable by admin in dispatch center */}
+          {aiReviewView.length > 0 && (
+            <div className="card" style={{ flexShrink: 0 }}>
+              <div className="card-head" style={{ background: "oklch(0.96 0.02 290)" }}>
+                <h3 style={{ color: "#7c3aed" }}>
+                  AI 初審完成，待派發
+                  <span className="block-tag" style={{ marginLeft: 8 }}>等待管理員派發給專家</span>
+                </h3>
+                <span className="hint">{aiReviewView.length} 件</span>
+              </div>
+              <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                <BudgetTable
+                  cols={[
+                    { k: "week",     label: "週數",       w: 78,  min: 60,  sortable: true },
+                    { k: "project",  label: "項目名稱",   w: 260, min: 160 },
+                    { k: "category", label: "類別",       w: 130, min: 100 },
+                    { k: "subCategory", label: "系統",    w: 120, min: 90  },
+                    { k: "owner",    label: "預算負責人", w: 130, min: 100 },
+                    { k: "amount",   label: "金額 (NT$)", w: 130, min: 110, align: "right", sortable: true },
+                    { k: "status",   label: "狀態",       w: 110, min: 90  },
+                  ]}
+                  rows={aiReviewView}
+                  onRow={onRow}
+                  sort={sort} toggleSort={toggleSort} arr={arr}
+                  startColResize={startColResize} setCols={setCols}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="block-head">
             <h3>待簽核 <span className="block-tag">專家評論完成，待簽核</span></h3>
             <span className="hint">{readyToSignView.length} 件</span>

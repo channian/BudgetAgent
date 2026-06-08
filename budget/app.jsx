@@ -262,7 +262,7 @@ function App() {
               <button onClick={() => setApiError(null)} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 600 }}>✕</button>
             </div>
           )}
-          <main className={`main ${(route === "pending" || route === "expert_review" || route === "approved") ? "fit" : ""}`}>{body}</main>
+          <main className={`main ${(route === "pending" || route === "expert_review") ? "fit" : ""}`}>{body}</main>
         </div>
       </div>
 
