@@ -1,5 +1,4 @@
 from flask import Blueprint, request, jsonify
-from werkzeug.security import generate_password_hash
 from db import cursor as db_cursor, row_to_dict
 from routes.auth import require_auth, current_user
 
@@ -39,14 +38,10 @@ def create_user():
     role       = (data.get("role")       or "viewer").strip()
     department = (data.get("department") or "").strip() or None
     email      = (data.get("email")      or "").strip() or None
-    password   = (data.get("password")   or "").strip()
-
     if not name or not ad_account:
         return jsonify(error="姓名與 AD 帳號為必填"), 400
     if role not in ROLES:
         return jsonify(error=f"角色必須是 {'/'.join(ROLES)} 其中之一"), 400
-
-    hashed = generate_password_hash(password) if password else ""
 
     try:
         with db_cursor(commit=True) as cur:
@@ -54,7 +49,7 @@ def create_user():
                 """INSERT INTO budget.users (name, department, ad_account, password, role, email)
                    VALUES (%s, %s, %s, %s, %s, %s)
                    RETURNING id""",
-                (name, department, ad_account, hashed, role, email),
+                (name, department, ad_account, "", role, email),
             )
             new_id = cur.fetchone()["id"]
     except Exception as e:
@@ -98,26 +93,3 @@ def update_user(user_id):
     return jsonify(user=row_to_dict(row))
 
 
-# ── Reset password (admin only) ───────────────────────────────────────
-@users_bp.put("/users/<int:user_id>/password")
-@require_auth
-def reset_password(user_id):
-    caller = current_user()
-    if caller.get("role") != "admin":
-        return jsonify(error="僅系統管理員可重設密碼"), 403
-
-    data     = request.json or {}
-    new_pass = (data.get("password") or "").strip()
-    if not new_pass:
-        return jsonify(error="密碼不得為空"), 400
-
-    hashed = generate_password_hash(new_pass)
-    try:
-        with db_cursor(commit=True) as cur:
-            cur.execute(
-                "UPDATE budget.users SET password = %s WHERE id = %s",
-                (hashed, user_id),
-            )
-    except Exception as e:
-        return jsonify(error=str(e)), 500
-    return jsonify(ok=True)

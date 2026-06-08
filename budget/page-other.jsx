@@ -561,7 +561,7 @@ function AssignmentPage() {
 const ROLE_LABELS = { admin: "系統管理員", boss: "主管簽核", expert: "專家複審", viewer: "檢視者" };
 const ROLE_COLORS = { admin: "var(--bad)", boss: "var(--info)", expert: "var(--accent)", viewer: "var(--text-muted)" };
 
-const EMPTY_FORM = { name: "", ad_account: "", department: "", email: "", role: "viewer", password: "" };
+const EMPTY_FORM = { name: "", ad_account: "", department: "", email: "", role: "viewer" };
 
 function PermissionsPage() {
   const [users,   setUsers]   = React.useState([]);
@@ -574,11 +574,6 @@ function PermissionsPage() {
   const [saving,  setSaving]  = React.useState(false);
   const [saveErr, setSaveErr] = React.useState("");
 
-  // Password reset sub-form
-  const [pwdUserId, setPwdUserId] = React.useState(null);
-  const [newPwd,    setNewPwd]    = React.useState("");
-  const [pwdMsg,    setPwdMsg]    = React.useState("");
-
   const load = () => {
     setLoading(true);
     API.fetchUsers()
@@ -589,7 +584,7 @@ function PermissionsPage() {
   React.useEffect(load, []);
 
   const openNew  = () => { setForm(EMPTY_FORM); setSaveErr(""); setModal("new"); };
-  const openEdit = (u) => { setForm({ name: u.name, ad_account: u.ad_account, department: u.department || "", email: u.email || "", role: u.role, password: "" }); setSaveErr(""); setModal(u); };
+  const openEdit = (u) => { setForm({ name: u.name, ad_account: u.ad_account, department: u.department || "", email: u.email || "", role: u.role }); setSaveErr(""); setModal(u); };
   const closeModal = () => { setModal(null); setSaveErr(""); };
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -602,7 +597,6 @@ function PermissionsPage() {
         await API.createUser(form);
       } else {
         await API.updateUser(modal.id, { name: form.name, department: form.department, email: form.email, role: form.role });
-        if (form.password) await API.resetPassword(modal.id, form.password);
       }
       closeModal();
       load();
@@ -610,17 +604,6 @@ function PermissionsPage() {
       setSaveErr(e.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const resetPwd = async (userId) => {
-    if (!newPwd.trim()) { setPwdMsg("請輸入密碼"); return; }
-    try {
-      await API.resetPassword(userId, newPwd);
-      setNewPwd(""); setPwdUserId(null); setPwdMsg("✅ 密碼已更新");
-      setTimeout(() => setPwdMsg(""), 3000);
-    } catch (e) {
-      setPwdMsg("❌ " + e.message);
     }
   };
 
@@ -638,7 +621,6 @@ function PermissionsPage() {
       </div>
 
       {err && <div style={{ padding: "8px 0", color: "var(--bad)", fontSize: 13 }}>⚠ {err}</div>}
-      {pwdMsg && <div style={{ padding: "8px 0", color: "var(--ok)", fontSize: 13 }}>{pwdMsg}</div>}
 
       {/* ── User table ── */}
       <div className="card">
@@ -666,24 +648,7 @@ function PermissionsPage() {
               </div>
               <div style={{ color: "var(--text-muted)", fontSize: 13 }}>{u.department || "—"}</div>
               <div style={{ textAlign: "right", display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                {pwdUserId === u.id ? (
-                  <>
-                    <input
-                      type="password"
-                      value={newPwd}
-                      onChange={e => setNewPwd(e.target.value)}
-                      placeholder="新密碼"
-                      style={{ width: 120, fontSize: 12, padding: "3px 7px", border: "1px solid var(--border)", borderRadius: 4 }}
-                    />
-                    <button className="btn sm" onClick={() => resetPwd(u.id)}>確認</button>
-                    <button className="btn sm ghost" onClick={() => { setPwdUserId(null); setNewPwd(""); }}>取消</button>
-                  </>
-                ) : (
-                  <>
-                    <button className="btn sm ghost" onClick={() => { setPwdUserId(u.id); setNewPwd(""); }}>重設密碼</button>
-                    <button className="btn sm" onClick={() => openEdit(u)}>編輯</button>
-                  </>
-                )}
+                <button className="btn sm" onClick={() => openEdit(u)}>編輯</button>
               </div>
             </div>
           ))}
@@ -766,11 +731,6 @@ function PermissionsPage() {
                     <option value="expert">expert — 專家複審</option>
                     <option value="viewer">viewer — 檢視者</option>
                   </select>
-                </div>
-                <div className="field">
-                  <label>{modal === "new" ? "初始密碼" : "重設密碼（選填）"}</label>
-                  <input type="password" value={form.password} onChange={e => set("password", e.target.value)}
-                    placeholder={modal === "new" ? "留空則帳號無法登入" : "不修改請留空"}/>
                 </div>
               </div>
 

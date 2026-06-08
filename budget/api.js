@@ -202,12 +202,6 @@ async function apiMe() {
   const d = await apiFetch("/api/auth/me");
   return d.user;
 }
-async function apiChangeMyPassword(newPassword) {
-  await apiFetch("/api/auth/me/password", {
-    method: "PUT",
-    body: JSON.stringify({ password: newPassword }),
-  });
-}
 
 // ── Budgets ───────────────────────────────────────────────────────────
 async function apiFetchBudgets(scope = "pending", filters = {}) {
@@ -294,9 +288,6 @@ async function apiCreateUser(form) {
 async function apiUpdateUser(id, form) {
   const d = await apiFetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(form) });
   return d.user;
-}
-async function apiResetPassword(id, password) {
-  await apiFetch(`/api/users/${id}/password`, { method: "PUT", body: JSON.stringify({ password }) });
 }
 
 // ── Export / Import ───────────────────────────────────────────────────
@@ -392,7 +383,6 @@ window.API = {
   login:               apiLogin,
   logout:              apiLogout,
   me:                  apiMe,
-  changeMyPassword:    apiChangeMyPassword,
   fetchBudgets:        apiFetchBudgets,
   fetchBudget:         apiFetchBudget,
   createBudget:        apiCreateBudget,
@@ -411,7 +401,6 @@ window.API = {
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,
-  resetPassword:       apiResetPassword,
   exportBudgets:       apiExportBudgets,
   importBudgets:       apiImportBudgets,
   fetchNotifications:  apiFetchNotifications,
