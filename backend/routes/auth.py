@@ -100,16 +100,21 @@ def login():
 
     # ── Step 2: try Windows AD (NTLM) authentication ─────────────────
     ad_error = None
+    print(f"[LOGIN] empno={empno!r}  starting AD auth", flush=True)
     try:
         from utils.ldap_auth import ad_authenticate
+        print(f"[LOGIN] ad_authenticate imported OK, calling now…", flush=True)
         ad_info = ad_authenticate(empno, password)
+        print(f"[LOGIN] ad_authenticate returned: {ad_info is not None}", flush=True)
     except ImportError as e:
         ad_info = None
         ad_error = f"ldap3 套件未安裝：{e}"
+        print(f"[LOGIN] ImportError: {e}", flush=True)
         logger.warning("AD login skipped — ldap3 not installed: %s", e)
     except Exception as e:
         ad_info = None
         ad_error = str(e)
+        print(f"[LOGIN] Exception during AD auth: {type(e).__name__}: {e}", flush=True)
         logger.warning("AD login exception for %s: %s", empno, e)
 
     if ad_info:
