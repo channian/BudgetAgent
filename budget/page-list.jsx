@@ -208,6 +208,189 @@ function BudgetTable({
   );
 }
 
+// ── Dashboard helpers ─────────────────────────────────────────────────
+function _computeStats(list) {
+  const passed    = list.filter(b => b.status === "CLOSED").length;
+  const rejected  = list.filter(b => b.status === "REJECTED").length;
+  const totalAmt  = list.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const cycled    = list.filter(b => b.cycleTime != null);
+  const avgCycle  = cycled.length
+    ? Math.round(cycled.reduce((s, b) => s + Number(b.cycleTime), 0) / cycled.length * 10) / 10
+    : null;
+  return { total: list.length, passed, rejected, totalAmt, avgCycle };
+}
+
+function _fmtShort(v) {
+  const n = Number(v) || 0;
+  if (n >= 1e8) return `${(n / 1e8).toFixed(1)}億`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e4) return `${(n / 1e4).toFixed(0)}萬`;
+  return n.toLocaleString();
+}
+
+function StatsCard({ title, subtitle, stats, accent = "#e86b4f" }) {
+  if (!stats) return (
+    <div className="card" style={{ opacity: 0.6 }}>
+      <div className="card-head"><h3>{title}</h3></div>
+      <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>載入中…</div>
+    </div>
+  );
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column" }}>
+      <div className="card-head">
+        <h3 style={{ fontWeight: 700 }}>{title}</h3>
+        <span className="hint" style={{ fontFamily: "monospace", fontSize: 12 }}>{subtitle}</span>
+      </div>
+      <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
+        {/* 件數 + 金額 */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+            <div style={{ fontSize: 38, fontWeight: 800, color: accent, lineHeight: 1, fontFamily: "monospace" }}>
+              {stats.total}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>完成件數</div>
+          </div>
+          <div style={{ textAlign: "center", padding: "12px 8px", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>
+              {_fmtShort(stats.totalAmt)}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>NT$</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 4 }}>合計金額</div>
+          </div>
+        </div>
+
+        {/* 通過 / 退件 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, fontSize: 13 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", flexShrink: 0 }}/>
+            通過 <b style={{ color: "#10b981" }}>{stats.passed}</b> 件
+          </div>
+          <div style={{ width: 1, height: 14, background: "var(--border)" }}/>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }}/>
+            退件 <b style={{ color: "#ef4444" }}>{stats.rejected}</b> 件
+          </div>
+        </div>
+
+        {/* 平均審核 */}
+        <div style={{ textAlign: "center", padding: "8px 0", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>平均審核</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", margin: "0 8px", fontFamily: "monospace" }}>
+            {stats.avgCycle != null ? stats.avgCycle : "—"}
+          </span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>天</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HBarChart({ data, emptyMsg = "無資料" }) {
+  if (!data || data.length === 0) {
+    return <div style={{ padding: "28px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>{emptyMsg}</div>;
+  }
+  const COLORS = ["#e86b4f","#c0456a","#7c3aed","#3b82f6","#06b6d4","#10b981","#f59e0b","#8b5cf6","#ec4899","#6366f1"];
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  const ROW_H = 32, GAP = 7;
+  const LW = 170, BW = 420, RW = 100;
+  const TW = LW + BW + RW;
+  const TH = data.length * (ROW_H + GAP);
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${TW} ${TH}`} style={{ display: "block", overflow: "visible" }}>
+      {data.map((d, i) => {
+        const bw    = (d.value / maxVal) * BW;
+        const y     = i * (ROW_H + GAP);
+        const color = d.color || COLORS[i % COLORS.length];
+        const disp  = d.displayVal !== undefined ? d.displayVal : `${d.value}件`;
+        const lbl   = d.label.length > 18 ? d.label.slice(0, 17) + "…" : d.label;
+        return (
+          <g key={i}>
+            <text x={26} y={y + ROW_H / 2 + 4} textAnchor="middle" fontSize={11}
+                  fill="#9ca3af" fontFamily="system-ui">#{i + 1}</text>
+            <text x={LW - 8} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize={12.5}
+                  fill="var(--text)" fontFamily="system-ui">{lbl}</text>
+            <rect x={LW} y={y + 4} width={BW} height={ROW_H - 8} rx={4} fill="#f3f4f6" opacity={0.6}/>
+            <rect x={LW} y={y + 4} width={Math.max(bw, 4)} height={ROW_H - 8} rx={4} fill={color} opacity={0.8}/>
+            <text x={LW + BW + 10} y={y + ROW_H / 2 + 4} fontSize={13} fill="var(--text)"
+                  fontWeight={600} fontFamily="system-ui">{disp}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function MonthlyTrendChart({ data }) {
+  const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  const W = 700, H = 220, PT = 28, PR = 70, PB = 44, PL = 52;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const maxC = Math.max(...data.map(d => d.count), 1);
+  const maxA = Math.max(...data.map(d => d.amount), 1);
+  const slotW = cW / 12, barW = slotW * 0.52;
+  const cx  = i => PL + (i + 0.5) * slotW;
+  const cyC = v => PT + cH - (v / maxC) * cH;
+  const cyA = v => PT + cH - (v / maxA) * cH;
+  const amtDiv  = maxA >= 1e6 ? 1e6 : maxA >= 1e4 ? 1e4 : 1;
+  const amtUnit = maxA >= 1e6 ? "M" : maxA >= 1e4 ? "萬" : "";
+  const aFmt = v => v === 0 ? "0" : `${+(v / amtDiv).toFixed(1)}${amtUnit}`;
+  const cTicks = [0, Math.round(maxC / 2), maxC];
+  const aTicks = [0, maxA * 0.5, maxA];
+  const linePts = data.map((d, i) => `${cx(i)},${cyA(d.amount)}`).join(" ");
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      {/* grid lines */}
+      {cTicks.map((v, i) => (
+        <line key={i} x1={PL} x2={W - PR} y1={cyC(v)} y2={cyC(v)}
+              stroke="#e5e7eb" strokeDasharray={i === 0 ? "0" : "3 3"} strokeWidth={1}/>
+      ))}
+      {/* bars – count */}
+      {data.map((d, i) => {
+        const bh = Math.max((d.count / maxC) * cH, d.count > 0 ? 2 : 0);
+        return <rect key={i} x={cx(i) - barW / 2} y={PT + cH - bh} width={barW} height={bh}
+                     rx={3} fill="#06b6d4" opacity={0.28}/>;
+      })}
+      {/* count labels */}
+      {data.map((d, i) => d.count > 0 && (
+        <text key={i} x={cx(i)} y={cyC(d.count) - 5} textAnchor="middle" fontSize={10}
+              fill="#06b6d4" fontWeight={700} fontFamily="system-ui">{d.count}</text>
+      ))}
+      {/* amount line */}
+      {maxA > 0 && <>
+        <polyline points={linePts} fill="none" stroke="#e86b4f" strokeWidth={2.5} strokeLinejoin="round"/>
+        {data.map((d, i) => d.amount > 0 && (
+          <circle key={i} cx={cx(i)} cy={cyA(d.amount)} r={4.5} fill="#e86b4f"/>
+        ))}
+      </>}
+      {/* X axis */}
+      <line x1={PL} x2={W - PR} y1={PT + cH} y2={PT + cH} stroke="#d1d5db" strokeWidth={1}/>
+      {MONTHS.map((m, i) => (
+        <text key={i} x={cx(i)} y={H - 8} textAnchor="middle" fontSize={11}
+              fill="#9ca3af" fontFamily="system-ui">{m}</text>
+      ))}
+      {/* left Y axis – count */}
+      <line x1={PL} x2={PL} y1={PT} y2={PT + cH} stroke="#d1d5db" strokeWidth={1}/>
+      {cTicks.map((v, i) => (
+        <text key={i} x={PL - 6} y={cyC(v) + 4} textAnchor="end" fontSize={10}
+              fill="#9ca3af" fontFamily="system-ui">{v}</text>
+      ))}
+      {/* right Y axis – amount */}
+      <line x1={W - PR} x2={W - PR} y1={PT} y2={PT + cH} stroke="#d1d5db" strokeWidth={1}/>
+      {aTicks.map((v, i) => (
+        <text key={i} x={W - PR + 5} y={cyA(v) + 4} textAnchor="start" fontSize={10}
+              fill="#e86b4f" fontFamily="system-ui">{aFmt(v)}</text>
+      ))}
+      {/* legend */}
+      <rect x={PL} y={PT - 18} width={14} height={10} rx={2} fill="#06b6d4" opacity={0.4}/>
+      <text x={PL + 18} y={PT - 9} fontSize={11} fill="#6b7280" fontFamily="system-ui">件數（柱）</text>
+      <line x1={PL + 80} x2={PL + 100} y1={PT - 13} y2={PT - 13} stroke="#e86b4f" strokeWidth={2}/>
+      <circle cx={PL + 90} cy={PT - 13} r={3.5} fill="#e86b4f"/>
+      <text x={PL + 105} y={PT - 9} fontSize={11} fill="#6b7280" fontFamily="system-ui">金額（線）</text>
+    </svg>
+  );
+}
+
 function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUser, onSign }) {
   const isPending      = scope === "pending";
   const isExpertReview = scope === "expert_review";
@@ -238,6 +421,76 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const [filterEnd,   setFilterEnd]   = React.useState("");
   const [filterCat,   setFilterCat]   = React.useState("");
   const [filterSys,   setFilterSys]   = React.useState("");
+
+  // Dashboard bar chart tab: "cat" | "sys" | "cycle"
+  const [barTab, setBarTab] = React.useState("cat");
+
+  // Dashboard computed stats
+  const weekRange = React.useMemo(() => {
+    const now = new Date();
+    const dow = now.getDay() === 0 ? 7 : now.getDay();
+    const mon = new Date(now); mon.setDate(now.getDate() - dow + 1);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const fmt = d => `${d.getMonth() + 1}/${d.getDate()}`;
+    return { label: `${fmt(mon)} – ${fmt(sun)}`, mon, sun };
+  }, []);
+
+  const currentISOWeek = React.useMemo(() => {
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+    const w1 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7);
+  }, []);
+
+  const currentYear = new Date().getFullYear();
+
+  const weekStats = React.useMemo(() => {
+    if (!isCompleted) return null;
+    const { mon, sun } = weekRange;
+    const sunEnd = new Date(sun); sunEnd.setHours(23, 59, 59, 999);
+    return _computeStats(completed.filter(b => {
+      if (!b.signDate) return false;
+      const d = new Date(b.signDate);
+      return d >= mon && d <= sunEnd;
+    }));
+  }, [completed, isCompleted, weekRange]);
+
+  const yearStats = React.useMemo(() => {
+    if (!isCompleted) return null;
+    return _computeStats(completed.filter(b =>
+      b.signDate && new Date(b.signDate).getFullYear() === currentYear
+    ));
+  }, [completed, isCompleted, currentYear]);
+
+  const catBarData = React.useMemo(() => {
+    if (!isCompleted) return [];
+    const map = {};
+    completed.forEach(b => { const k = b.category || "（未分類）"; map[k] = (map[k] || 0) + 1; });
+    return Object.entries(map).map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value).slice(0, 10);
+  }, [completed, isCompleted]);
+
+  const sysBarData = React.useMemo(() => {
+    if (!isCompleted) return [];
+    const map = {};
+    completed.forEach(b => { const k = b.subCategory || "（未分類）"; map[k] = (map[k] || 0) + 1; });
+    return Object.entries(map).map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value).slice(0, 10);
+  }, [completed, isCompleted]);
+
+  const monthlyTrendData = React.useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, count: 0, amount: 0 }));
+    if (isCompleted) {
+      completed
+        .filter(b => b.signDate && new Date(b.signDate).getFullYear() === currentYear)
+        .forEach(b => {
+          const m = new Date(b.signDate).getMonth();
+          months[m].count++;
+          months[m].amount += Number(b.amount) || 0;
+        });
+    }
+    return months;
+  }, [completed, isCompleted, currentYear]);
 
   // 已簽核完成 import/export + sheet picker
   const fileRef     = React.useRef();
@@ -383,6 +636,17 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       .sort((a, bv) => (bv.avg ?? -1) - (a.avg ?? -1));
   }, [completedView]);
 
+  const cycleBarData = React.useMemo(() =>
+    cycleBySystem
+      .filter(d => d.avg != null)
+      .map(d => ({
+        label: d.sys,
+        value: d.avg,
+        displayVal: `${d.avg}天 (${d.cnt}件)`,
+        color: d.avg <= 1 ? "#10b981" : d.avg <= 3 ? "#f59e0b" : "#ef4444",
+      })),
+    [cycleBySystem]);
+
   // Batch sign
   const selectableIds = readyToSignView.map((b) => b.dbId);
   const allSelected  = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
@@ -460,59 +724,62 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         </div>
       </div>
 
-      <div className="kpi-row">
-        <div className="kpi k-blue">
-          <div className="glyph"><Icon.Inbox s={18}/></div>
-          <div className="lbl">{isCompleted ? "近 30 日已核可" : isPending ? "待處理案件" : "待審核案件"}</div>
-          <div className="val tnum">{allDisplay.length}<small>件</small></div>
-          <div className="delta up">
-            {isPending      ? `共 ${readyToSignView.length} 件待簽核` :
-             isExpertReview ? `共 ${awaitingExpertView.length} 件待評論` :
-             "已結案"}
+      {/* ── KPI row (pending / expert only) ── */}
+      {!isCompleted && (
+        <>
+          <div className="kpi-row">
+            <div className="kpi k-blue">
+              <div className="glyph"><Icon.Inbox s={18}/></div>
+              <div className="lbl">{isPending ? "待處理案件" : "待審核案件"}</div>
+              <div className="val tnum">{allDisplay.length}<small>件</small></div>
+              <div className="delta up">
+                {isPending ? `共 ${readyToSignView.length} 件待簽核` : `共 ${awaitingExpertView.length} 件待評論`}
+              </div>
+            </div>
+            <div className="kpi k-purple">
+              <div className="glyph"><Icon.Sparkles s={18}/></div>
+              <div className="lbl">合計金額</div>
+              <div className="val tnum">NT$ {fmtAmount(totalAmt)}</div>
+              <div className="delta">本期度</div>
+            </div>
+            <div className="kpi k-green">
+              <div className="glyph"><Icon.Check s={18}/></div>
+              <div className="lbl">AI 建議核可</div>
+              <div className="val tnum">{aiApprovedCnt}<small>/ {allDisplay.length}</small></div>
+              <div className="delta">採納率 {allDisplay.length ? Math.round(aiApprovedCnt / allDisplay.length * 100) : 0}%</div>
+            </div>
+            <div className="kpi k-amber">
+              <div className="glyph"><Icon.Bell s={18}/></div>
+              <div className="lbl">超出 SLA (&gt; 3d)</div>
+              <div className="val tnum">{overSLA}<small>件</small></div>
+              <div className={`delta ${overSLA > 2 ? "down" : "up"}`}>{overSLA > 2 ? "▼ 注意" : "▲ 健康"}</div>
+            </div>
           </div>
-        </div>
-        <div className="kpi k-purple">
-          <div className="glyph"><Icon.Sparkles s={18}/></div>
-          <div className="lbl">合計金額</div>
-          <div className="val tnum">NT$ {fmtAmount(totalAmt)}</div>
-          <div className="delta">本期度</div>
-        </div>
-        <div className="kpi k-green">
-          <div className="glyph"><Icon.Check s={18}/></div>
-          <div className="lbl">AI 建議核可</div>
-          <div className="val tnum">{aiApprovedCnt}<small>/ {allDisplay.length}</small></div>
-          <div className="delta">採納率 {allDisplay.length ? Math.round(aiApprovedCnt / allDisplay.length * 100) : 0}%</div>
-        </div>
-        <div className="kpi k-amber">
-          <div className="glyph"><Icon.Bell s={18}/></div>
-          <div className="lbl">超出 SLA (&gt; 3d)</div>
-          <div className="val tnum">{overSLA}<small>件</small></div>
-          <div className={`delta ${overSLA > 2 ? "down" : "up"}`}>{overSLA > 2 ? "▼ 注意" : "▲ 健康"}</div>
-        </div>
-      </div>
 
-      <div className="toolbar">
-        <div className="search">
-          <Icon.Search/>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋預算單號、項目名稱、專家、負責人…" />
-          <kbd>⌘K</kbd>
-        </div>
-        <div className="divider"/>
-        <select className="field-sel" value={aiFilter} onChange={(e) => setAiFilter(e.target.value)}>
-          <option value="all">全部 AI 結果</option>
-          <option value="approve">AI 建議核可</option>
-          <option value="reject">AI 建議退回</option>
-          <option value="hold">AI 無法判定</option>
-        </select>
-        <div className="spacer-x"/>
-        {isPending && canSign && selected.size > 0 && (
-          <button className="btn accent" onClick={batchSign} disabled={batchBusy}>
-            {batchBusy ? "簽核中…" : `一鍵簽核 (${selected.size})`}
-          </button>
-        )}
-      </div>
+          <div className="toolbar">
+            <div className="search">
+              <Icon.Search/>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋預算單號、項目名稱、專家、負責人…" />
+              <kbd>⌘K</kbd>
+            </div>
+            <div className="divider"/>
+            <select className="field-sel" value={aiFilter} onChange={(e) => setAiFilter(e.target.value)}>
+              <option value="all">全部 AI 結果</option>
+              <option value="approve">AI 建議核可</option>
+              <option value="reject">AI 建議退回</option>
+              <option value="hold">AI 無法判定</option>
+            </select>
+            <div className="spacer-x"/>
+            {isPending && canSign && selected.size > 0 && (
+              <button className="btn accent" onClick={batchSign} disabled={batchBusy}>
+                {batchBusy ? "簽核中…" : `一鍵簽核 (${selected.size})`}
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
-      {/* ── 待簽核 main page — only cases ready for admin to sign ── */}
+      {/* ── 待簽核 main page ── */}
       {isPending && (
         <>
           <div className="block-head">
@@ -559,82 +826,113 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         </>
       )}
 
-      {/* ── 已簽核完成 page ── */}
+      {/* ══ 已簽核完成 — Dashboard ══════════════════════════════════════ */}
       {isCompleted && (
         <>
+          {/* Import message banner */}
           {impMsg && (
             <div style={{ padding: "8px 14px", background: impMsg.startsWith("⚠") ? "var(--bad-soft)" : "var(--ok-soft)",
                           color: impMsg.startsWith("⚠") ? "var(--bad)" : "var(--ok)",
-                          borderRadius: "var(--radius)", fontSize: 13, marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>
+                          borderRadius: "var(--radius)", fontSize: 13, marginBottom: 12,
+                          display: "flex", alignItems: "center", gap: 10 }}>
               <span>{impMsg}</span>
               <button onClick={() => setImpMsg("")} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: "inherit" }}>✕</button>
             </div>
           )}
 
-          {cycleBySystem.length > 0 && (
-            <div className="card" style={{ marginBottom: 12 }}>
-              <div className="card-head">
-                <h3>各系統 Cycle Time</h3>
-                <span className="hint">平均審核天數（依目前篩選結果 {completedView.length} 件）</span>
+          {/* ── Row 1: 本週 + 年度 KPI ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <StatsCard
+              title="本週累計"
+              subtitle={`W${String(currentISOWeek).padStart(2, "0")} · ${weekRange.label}`}
+              stats={weekStats}
+              accent="#06b6d4"
+            />
+            <StatsCard
+              title="年度累計"
+              subtitle={`${currentYear} 年`}
+              stats={yearStats}
+              accent="#e86b4f"
+            />
+          </div>
+
+          {/* ── Row 2: 完成件數排行 bar chart ── */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-head">
+              <h3>完成件數排行</h3>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[["cat","依類別"],["sys","依系統"],["cycle","審核時效"]].map(([k, lbl]) => (
+                  <button key={k} className={`btn sm ${barTab === k ? "accent" : "ghost"}`}
+                          onClick={() => setBarTab(k)}
+                          style={{ fontSize: 12 }}>{lbl}</button>
+                ))}
               </div>
-              <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {cycleBySystem.map(({ sys, avg, cnt }) => {
-                  const col = avg == null ? "var(--text-muted)" : avg <= 1 ? "#10b981" : avg <= 3 ? "#f59e0b" : "#ef4444";
-                  const pct = avg == null ? 0 : Math.min(100, (avg / 10) * 100);
-                  return (
-                    <div key={sys}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
-                        <span style={{ color: "var(--text)", fontWeight: 500 }}>{sys}</span>
-                        <span style={{ color: col, fontFamily: "monospace", fontWeight: 600 }}>
-                          {avg != null ? `${avg}d` : "—"}
-                          <span style={{ color: "var(--text-muted)", fontWeight: 400, marginLeft: 6 }}>({cnt} 件)</span>
-                        </span>
-                      </div>
-                      <div style={{ height: 8, background: "var(--surface-2)", borderRadius: 4, overflow: "hidden" }}>
-                        <div style={{ width: `${pct}%`, height: "100%", background: col, borderRadius: 4, transition: "width 0.4s ease" }}/>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 4, display: "flex", gap: 16 }}>
+            </div>
+            <div className="card-body" style={{ paddingTop: 12, paddingBottom: 16 }}>
+              {barTab === "cycle"
+                ? <HBarChart data={cycleBarData} emptyMsg="無 Cycle Time 資料"/>
+                : <HBarChart data={barTab === "cat" ? catBarData : sysBarData}/>}
+              {barTab === "cycle" && (
+                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 10, display: "flex", gap: 16 }}>
                   <span style={{ color: "#10b981" }}>● ≤ 1 天（優）</span>
                   <span style={{ color: "#f59e0b" }}>● ≤ 3 天（達標）</span>
                   <span style={{ color: "#ef4444" }}>● &gt; 3 天（超時）</span>
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Row 3: 每月趨勢 ── */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-head">
+              <h3>每月審核趨勢</h3>
+              <span className="hint">{currentYear} 年 · 柱=件數 · 線=金額</span>
+            </div>
+            <div className="card-body" style={{ paddingBottom: 8 }}>
+              <MonthlyTrendChart data={monthlyTrendData}/>
+            </div>
+          </div>
+
+          {/* ── Row 4: 明細列表 ── */}
+          <div className="card">
+            <div className="card-head" style={{ flexWrap: "wrap", gap: 8 }}>
+              <h3>已簽核明細 <span style={{ fontSize: 12, fontWeight: 400, color: "var(--text-muted)" }}>({completedView.length} 件)</span></h3>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+                <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
+                  className="field-sel" style={{ width: 132 }} placeholder="起"/>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>–</span>
+                <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)}
+                  className="field-sel" style={{ width: 132 }}/>
+                <select className="field-sel" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+                  <option value="">全部類別</option>
+                  {[...new Set(completed.map(b => b.category).filter(Boolean))].sort()
+                    .map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select className="field-sel" value={filterSys} onChange={e => setFilterSys(e.target.value)}>
+                  <option value="">全部系統</option>
+                  {[...new Set(completed.map(b => b.subCategory).filter(Boolean))].sort()
+                    .map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <div className="search" style={{ width: 180 }}>
+                  <Icon.Search/>
+                  <input value={q} onChange={e => setQ(e.target.value)} placeholder="搜尋…"/>
+                </div>
+                {(filterStart || filterEnd || filterCat || filterSys || q) && (
+                  <button className="btn ghost sm" onClick={() => { setFilterStart(""); setFilterEnd(""); setFilterCat(""); setFilterSys(""); setQ(""); }}>
+                    清除
+                  </button>
+                )}
               </div>
             </div>
-          )}
-
-          <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>簽核日期</span>
-            <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
-              className="field-sel" style={{ width: 140 }} />
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>
-            <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)}
-              className="field-sel" style={{ width: 140 }} />
-            <div className="divider" />
-            <select className="field-sel" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
-              <option value="">全部類別</option>
-              {[...new Set(completed.map(b => b.category).filter(Boolean))].sort()
-                .map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select className="field-sel" value={filterSys} onChange={e => setFilterSys(e.target.value)}>
-              <option value="">全部系統</option>
-              {[...new Set(completed.map(b => b.subCategory).filter(Boolean))].sort()
-                .map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            {(filterStart || filterEnd || filterCat || filterSys) && (
-              <button className="btn ghost sm" onClick={() => { setFilterStart(""); setFilterEnd(""); setFilterCat(""); setFilterSys(""); }}>
-                清除篩選
-              </button>
-            )}
-          </div>
-          <div className="table-wrap" style={{ overflowY: "auto", maxHeight: 560 }}>
-            {completedView.length === 0 ? (
-              <div className="empty">查無符合條件之案件</div>
-            ) : (
-              <BudgetTable {...tableProps} rows={completedView} />
-            )}
+            <div className="card-body tight" style={{ padding: 0 }}>
+              <div className="table-wrap" style={{ maxHeight: 520, overflowY: "auto" }}>
+                {completedView.length === 0 ? (
+                  <div className="empty">查無符合條件之案件</div>
+                ) : (
+                  <BudgetTable {...tableProps} rows={completedView}/>
+                )}
+              </div>
+            </div>
           </div>
         </>
       )}
