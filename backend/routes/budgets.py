@@ -1016,9 +1016,28 @@ def _parse_cycle(v):
         return None
 
 
+def _find_header_row(rows, max_scan=6):
+    """Scan the first `max_scan` rows and return the index of the row that
+    contains the most recognised column aliases (from either alias table).
+    Falls back to row 0 if nothing matches."""
+    all_aliases = set()
+    for alts in IMPORT_ALIASES.values():
+        all_aliases.update(alts)
+    for alts in COMPLETED_IMPORT_ALIASES.values():
+        all_aliases.update(alts)
+
+    best_idx, best_hits = 0, 0
+    for i, row in enumerate(rows[:max_scan]):
+        hits = sum(1 for cell in row if str(cell or "").strip() in all_aliases)
+        if hits > best_hits:
+            best_hits, best_idx = hits, i
+    return best_idx
+
+
 def _load_sheet(f, sheet_name=None):
     """Load rows from an uploaded xlsx or csv file.
-    Returns (header_row, data_rows) where all values are plain strings/scalars."""
+    Returns (header_row, data_rows) where all values are plain strings/scalars.
+    Auto-detects which row contains the column headers (not necessarily row 1)."""
     name = f.filename.lower()
     if name.endswith(".xlsx"):
         from openpyxl import load_workbook
@@ -1030,12 +1049,14 @@ def _load_sheet(f, sheet_name=None):
         data = list(ws.iter_rows(values_only=True))
         if not data:
             raise ValueError("工作表是空的")
-        return data[0], data[1:]
+        hi = _find_header_row(data)
+        return data[hi], data[hi + 1:]
     elif name.endswith(".csv"):
         rows = list(csv.reader(f.read().decode("utf-8-sig").splitlines()))
         if not rows:
             raise ValueError("檔案是空的")
-        return rows[0], rows[1:]
+        hi = _find_header_row(rows)
+        return rows[hi], rows[hi + 1:]
     else:
         raise ValueError("僅支援 .csv 或 .xlsx 檔案")
 
