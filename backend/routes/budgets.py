@@ -377,6 +377,89 @@ def dispatch_budget(budget_id):
     return jsonify(budget=after, email_status=email_status)
 
 
+# ── Reassign a dispatched case to a new expert (admin only) ──────────
+@budgets_bp.post("/budgets/<int:budget_id>/reassign")
+@require_auth
+def reassign_budget(budget_id):
+    user = current_user()
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可重派案件"), 403
+
+    data        = request.json or {}
+    expert_name = (data.get("expert_name") or "").strip()
+    reason      = (data.get("reason")      or "").strip()
+    if not expert_name:
+        return jsonify(error="請選擇新的負責專家"), 400
+    if not reason:
+        return jsonify(error="請填寫重派原因"), 400
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
+            before_row = cur.fetchone()
+        if not before_row:
+            return jsonify(error="案件不存在"), 404
+        before = row_to_dict(before_row)
+
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests
+                   SET expert_name   = %s,
+                       dispatch_date = NOW(),
+                       status        = 'EXPERT_REVIEW',
+                       updated_at    = NOW()
+                   WHERE id = %s
+                   RETURNING *""",
+                (expert_name, budget_id),
+            )
+            after = row_to_dict(cur.fetchone())
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    audit_log(budget_id, "REASSIGN", user.get("name", "system"), before, after)
+    _notify_roles(["admin"],
+        f"🔄 {user.get('name','系統')} 重派案件「{before['project_name']}」(#{budget_id})，"
+        f"原因：{reason}，新指派：{expert_name}。")
+
+    # In-app notification to new expert
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id FROM budget.users WHERE name = %s", (expert_name,))
+            eu = cur.fetchone()
+        if eu:
+            with db_cursor(commit=True) as cur:
+                cur.execute(
+                    "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
+                    (eu["id"],
+                     f"📋 案件「{before['project_name']}」(#{budget_id}) 已重派給您，請盡速審核。"),
+                )
+    except Exception:
+        pass
+
+    # Email to new expert
+    email_status = None
+    try:
+        from utils.expert_directory import resolve_email
+        from utils.email_service import send_dispatch_email
+        expert_email = resolve_email(expert_name)
+        if expert_email:
+            ok = send_dispatch_email(
+                to_email=expert_email, expert_name=expert_name,
+                project_name=before["project_name"], budget_id=budget_id,
+                budget_no=after.get("budget_no"), amount=after.get("amount"),
+                dispatch_date=after.get("dispatch_date"),
+            )
+            email_status = "sent" if ok else "failed"
+        else:
+            email_status = "no_email"
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Email reassign error: %s", e)
+        email_status = "error"
+
+    return jsonify(budget=after, email_status=email_status)
+
+
 # ── Delete a case (admin only) ───────────────────────────────────────
 @budgets_bp.delete("/budgets/<int:budget_id>")
 @require_auth

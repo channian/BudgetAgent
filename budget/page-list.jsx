@@ -233,37 +233,11 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const [selected, setSelected] = React.useState(new Set());
   const [batchBusy, setBatchBusy] = React.useState(false);
 
-  // budgetNo overrides: {dbId: newBudgetNo} for optimistic UI update in AI_REVIEW block
-  const [budgetNoOverrides, setBudgetNoOverrides] = React.useState({});
-
-  const exportScope = isPending || isExpertReview ? "pending" : "completed";
-  const fileRef = React.useRef(null);
-  const [busy, setBusy] = React.useState("");
-
-  const doExport = async (fmt) => {
-    setBusy(fmt);
-    try { await API.exportBudgets(exportScope, fmt); }
-    catch (e) { alert("匯出失敗：" + e.message); }
-    finally { setBusy(""); }
-  };
-
-  const doImport = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!file) return;
-    setBusy("import");
-    try {
-      const r = await API.importBudgets(file);
-      let msg = `匯入完成：新增/更新 ${r.inserted} 筆，略過 ${r.skipped} 筆。`;
-      if (r.errors && r.errors.length) msg += `\n錯誤 ${r.errors.length} 筆：\n` + r.errors.join("\n");
-      alert(msg);
-      onRefresh && onRefresh();
-    } catch (err) {
-      alert("匯入失敗：" + err.message);
-    } finally {
-      setBusy("");
-    }
-  };
+  // 已簽核完成 extra filters
+  const [filterStart, setFilterStart] = React.useState("");
+  const [filterEnd,   setFilterEnd]   = React.useState("");
+  const [filterCat,   setFilterCat]   = React.useState("");
+  const [filterSys,   setFilterSys]   = React.useState("");
 
   // Persist column widths
   const storeKey = `pensieve.cols.${scope}`;
@@ -333,7 +307,14 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const readyToSignView   = React.useMemo(() => applyView(readyToSign),    [applyView, budgets]);
   const awaitingExpertView= React.useMemo(() => applyView(awaitingExpert), [applyView, budgets]);
   const aiReviewView      = React.useMemo(() => applyView(aiReviewCases),  [applyView, budgets]);
-  const completedView     = React.useMemo(() => applyView(completed),       [applyView, budgets]);
+  const completedView     = React.useMemo(() => {
+    let r = applyView(completed);
+    if (filterStart) r = r.filter(b => b.signDate && b.signDate >= filterStart);
+    if (filterEnd)   r = r.filter(b => b.signDate && b.signDate <= filterEnd + "T23:59:59");
+    if (filterCat)   r = r.filter(b => b.category === filterCat);
+    if (filterSys)   r = r.filter(b => b.subCategory === filterSys);
+    return r;
+  }, [applyView, budgets, filterStart, filterEnd, filterCat, filterSys]);
 
   // Batch sign
   const selectableIds = readyToSignView.map((b) => b.dbId);
@@ -398,16 +379,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
         </div>
         <div className="actions">
           <button className="btn" onClick={onRefresh} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
-          <button className="btn" onClick={() => doExport("xlsx")} disabled={busy === "xlsx"}>
-            <Icon.Download/>{busy === "xlsx" ? "匯出中…" : "匯出 XLSX"}
-          </button>
-          <button className="btn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy === "import"}>
-            <Icon.Upload/>{busy === "import" ? "匯入中…" : "匯入 CSV/XLSX"}
-          </button>
-          <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImport} />
-          {isPending && isAdmin && (
-            <button className="btn accent" onClick={onNew}><Icon.Plus/>建立預算單</button>
-          )}
         </div>
       </div>
 
@@ -512,13 +483,39 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
       {/* ── 已簽核完成 page ── */}
       {isCompleted && (
-        <div className="table-wrap">
-          {completedView.length === 0 ? (
-            <div className="empty">查無符合條件之案件</div>
-          ) : (
-            <BudgetTable {...tableProps} rows={completedView} />
-          )}
-        </div>
+        <>
+          <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>簽核日期</span>
+            <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
+              className="field-sel" style={{ width: 140 }} />
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>—</span>
+            <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)}
+              className="field-sel" style={{ width: 140 }} />
+            <div className="divider" />
+            <select className="field-sel" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+              <option value="">全部類別</option>
+              {[...new Set(completed.map(b => b.category).filter(Boolean))].sort()
+                .map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select className="field-sel" value={filterSys} onChange={e => setFilterSys(e.target.value)}>
+              <option value="">全部系統</option>
+              {[...new Set(completed.map(b => b.subCategory).filter(Boolean))].sort()
+                .map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {(filterStart || filterEnd || filterCat || filterSys) && (
+              <button className="btn ghost sm" onClick={() => { setFilterStart(""); setFilterEnd(""); setFilterCat(""); setFilterSys(""); }}>
+                清除篩選
+              </button>
+            )}
+          </div>
+          <div className="table-wrap" style={{ overflowY: "auto", maxHeight: 560 }}>
+            {completedView.length === 0 ? (
+              <div className="empty">查無符合條件之案件</div>
+            ) : (
+              <BudgetTable {...tableProps} rows={completedView} />
+            )}
+          </div>
+        </>
       )}
     </>
   );

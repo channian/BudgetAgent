@@ -57,14 +57,33 @@ def init_library_schema():
                 ALTER TABLE budget.rag_systems
                 ADD COLUMN IF NOT EXISTS expert_name VARCHAR;
             """)
-            # Seed 16 placeholder systems only when the table is empty
+            # Seed with 5 categories on empty table; also replace auto-generated
+            # "系統 XX" placeholders if no real entries exist yet.
+            SEED_NAMES = ["歷史資料", "料單", "外部資料", "其他", "待定"]
             cur.execute("SELECT COUNT(*) AS n FROM budget.rag_systems")
-            if cur.fetchone()["n"] == 0:
-                for i in range(1, 17):
+            total = cur.fetchone()["n"]
+            if total == 0:
+                for i, name in enumerate(SEED_NAMES, 1):
                     cur.execute(
                         "INSERT INTO budget.rag_systems (name, sort_order) VALUES (%s, %s)",
-                        (f"系統 {i:02d}", i),
+                        (name, i),
                     )
+            else:
+                # Replace auto-generated "系統 XX" placeholders that have no entries
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM budget.rag_systems WHERE name NOT LIKE '系統 %'"
+                )
+                has_custom = cur.fetchone()["n"] > 0
+                if not has_custom:
+                    cur.execute("SELECT COUNT(*) AS n FROM budget.rag_entries")
+                    has_entries = cur.fetchone()["n"] > 0
+                    if not has_entries:
+                        cur.execute("DELETE FROM budget.rag_systems")
+                        for i, name in enumerate(SEED_NAMES, 1):
+                            cur.execute(
+                                "INSERT INTO budget.rag_systems (name, sort_order) VALUES (%s, %s)",
+                                (name, i),
+                            )
     except Exception as e:
         # Don't crash app boot if DB is unreachable; surfaced again on first request
         print(f"[library] schema init skipped: {e}")

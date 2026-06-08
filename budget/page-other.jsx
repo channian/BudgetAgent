@@ -342,7 +342,9 @@ function RagSystemDetail({ system, currentUser, onBack }) {
   );
 }
 
-function AssignmentPage() {
+function AssignmentPage({ currentUser }) {
+  const isAdmin = currentUser?.role === "admin";
+
   const [aiCases,     setAiCases]     = React.useState([]);
   const [dispatched,  setDispatched]  = React.useState([]);
   const [loading,     setLoading]     = React.useState(true);
@@ -351,6 +353,12 @@ function AssignmentPage() {
   const [dispatching, setDispatching] = React.useState({});   // {dbId: true}
   const [doneInfo,    setDoneInfo]    = React.useState({});   // {dbId: updatedBudget}
   const [errMsg,      setErrMsg]      = React.useState({});
+
+  // Reassign state
+  const [reassignBudget, setReassignBudget] = React.useState(null);
+  const [reassignForm,   setReassignForm]   = React.useState({ expert_name: "", reason: "" });
+  const [reassigning,    setReassigning]    = React.useState(false);
+  const [reassignErr,    setReassignErr]    = React.useState("");
 
   const load = async () => {
     setLoading(true);
@@ -421,6 +429,43 @@ function AssignmentPage() {
     }
   };
 
+  const openReassign = (b) => {
+    setReassignBudget(b);
+    setReassignForm({ expert_name: b.expertName || "", reason: "" });
+    setReassignErr("");
+  };
+  const closeReassign = () => { setReassignBudget(null); };
+
+  const doReassign = async () => {
+    if (!reassignForm.expert_name.trim()) { setReassignErr("請選擇新的負責專家"); return; }
+    if (!reassignForm.reason.trim())      { setReassignErr("請填寫重派原因");     return; }
+    setReassigning(true); setReassignErr("");
+    try {
+      await API.reassign(reassignBudget.dbId, reassignForm);
+      closeReassign();
+      load();
+      Toast.show(`✅ 已重新派發給「${reassignForm.expert_name}」`, "ok");
+    } catch (e) {
+      setReassignErr(e.message);
+    } finally {
+      setReassigning(false);
+    }
+  };
+
+  const doDeleteCase = async (b) => {
+    if (!confirm(
+      `確定刪除案件「${b.project}」？\n此操作無法復原，相關審核紀錄將一併移除。`
+    )) return;
+    try {
+      await API.deleteBudget(b.dbId, "管理員於派發中心刪除");
+      setDispatched(ds => ds.filter(d => d.dbId !== b.dbId));
+      setAiCases(cs => cs.filter(c => c.dbId !== b.dbId));
+      Toast.show("✅ 案件已刪除", "ok");
+    } catch (e) {
+      setErrMsg(err => ({ ...err, _global: e.message }));
+    }
+  };
+
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString("zh-TW") : "—";
 
   return (
@@ -447,7 +492,7 @@ function AssignmentPage() {
           <h3>待派發案件 <span className="tag">AI_REVIEW</span></h3>
           <span className="hint">{loading ? "載入中…" : `${aiCases.length} 件待派發`}</span>
         </div>
-        <div className="card-body tight">
+        <div className="card-body tight" style={{ maxHeight: 480, overflowY: "auto" }}>
           {loading ? (
             <div className="empty">載入中…</div>
           ) : aiCases.length === 0 ? (
@@ -527,7 +572,7 @@ function AssignmentPage() {
           <h3>已派發案件</h3>
           <span className="hint">{dispatched.length} 件</span>
         </div>
-        <div className="card-body tight">
+        <div className="card-body tight" style={{ maxHeight: 480, overflowY: "auto" }}>
           {dispatched.length === 0 ? (
             <div className="empty">尚無已派發案件</div>
           ) : (
@@ -539,6 +584,7 @@ function AssignmentPage() {
                 <div>負責專家</div>
                 <div>派發日期</div>
                 <div>狀態</div>
+                <div style={{ textAlign: "right" }}>操作</div>
               </div>
               {dispatched.map(b => (
                 <div key={b.dbId} className="sent-row">
@@ -548,12 +594,66 @@ function AssignmentPage() {
                   <div>{b.expertName || <span style={{ color: "var(--text-muted)" }}>未指定</span>}</div>
                   <div className="mono" style={{ fontSize: 12 }}>{fmtDate(b.dispatchDate)}</div>
                   <div><StatusBadge status={b.status}/></div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <button className="btn sm ghost" onClick={() => openReassign(b)}>重派</button>
+                    {isAdmin && (
+                      <button className="btn sm ghost" style={{ color: "var(--bad)", borderColor: "var(--bad)" }}
+                        onClick={() => doDeleteCase(b)}>刪除</button>
+                    )}
+                  </div>
                 </div>
               ))}
             </>
           )}
         </div>
       </div>
+
+      {/* ── Reassign modal ── */}
+      {reassignBudget && (
+        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 200, display: "grid", placeItems: "center" }}
+             onClick={e => e.target === e.currentTarget && closeReassign()}>
+          <div className="card" style={{ width: 440, maxWidth: "92vw", padding: 0 }}>
+            <div className="card-head" style={{ padding: "16px 20px" }}>
+              <h3>重新派發</h3>
+              <button className="btn ghost sm" onClick={closeReassign}>✕</button>
+            </div>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                案件：<b style={{ color: "var(--text)" }}>{reassignBudget.project}</b>
+              </div>
+              <div className="field">
+                <label>重派原因 <span className="req">*</span></label>
+                <textarea rows={3} value={reassignForm.reason}
+                  onChange={e => setReassignForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="說明重新派發的原因…"/>
+              </div>
+              <div className="field">
+                <label>新負責專家 <span className="req">*</span></label>
+                {experts.length > 0 ? (
+                  <select value={reassignForm.expert_name}
+                    onChange={e => setReassignForm(f => ({ ...f, expert_name: e.target.value }))}>
+                    <option value="">— 選擇專家 —</option>
+                    {experts.map(ex => (
+                      <option key={ex.id} value={ex.name}>{ex.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input type="text" value={reassignForm.expert_name}
+                    onChange={e => setReassignForm(f => ({ ...f, expert_name: e.target.value }))}
+                    placeholder="填入專家姓名"/>
+                )}
+              </div>
+              {reassignErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {reassignErr}</div>}
+              <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn ghost" onClick={closeReassign}>取消</button>
+                <button className="btn primary" onClick={doReassign} disabled={reassigning}>
+                  {reassigning ? "派發中…" : "確認重派"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -920,4 +1020,141 @@ function ActivityPage() {
   );
 }
 
-Object.assign(window, { LibraryPage, AssignmentPage, PermissionsPage, ActivityPage });
+// ── Data Import page ─────────────────────────────────────────────────
+function DataImportPage({ onNew, onRefresh, currentUser }) {
+  const [busy,    setBusy]    = React.useState(false);
+  const [impMsg,  setImpMsg]  = React.useState("");
+  const fileRef = React.useRef();
+
+  const doExport = async () => {
+    setBusy(true);
+    try {
+      await API.exportBudgets("pending", "csv");
+    } catch (e) {
+      alert("匯出失敗：" + e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setBusy(true); setImpMsg("");
+    try {
+      const result = await API.importBudgets(file);
+      const msg = `匯入完成：新增 ${result.inserted ?? result.created ?? 0} 筆，略過 ${result.skipped ?? 0} 筆`;
+      setImpMsg(msg);
+      onRefresh();
+    } catch (e) {
+      setImpMsg("⚠ 匯入失敗：" + e.message);
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h2>前端資料導入</h2>
+          <div className="lede">手動建立預算單，或以 CSV 批次匯入、匯出現有資料</div>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={doExport} disabled={busy}>
+            <Icon.Download/>匯出 CSV
+          </button>
+          <button className="btn" onClick={() => fileRef.current.click()} disabled={busy}>
+            <Icon.Upload/>匯入 CSV / Excel
+          </button>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx" style={{ display: "none" }} onChange={doImport}/>
+          <button className="btn accent" onClick={onNew}>
+            <Icon.Plus/>建立預算單
+          </button>
+        </div>
+      </div>
+
+      {impMsg && (
+        <div style={{ padding: "8px 14px", background: impMsg.startsWith("⚠") ? "var(--bad-soft)" : "var(--ok-soft)",
+                      color: impMsg.startsWith("⚠") ? "var(--bad)" : "var(--ok)",
+                      borderRadius: "var(--radius)", fontSize: 13, marginBottom: 4 }}>
+          {impMsg}
+          <button onClick={() => setImpMsg("")} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit" }}>✕</button>
+        </div>
+      )}
+
+      {/* ── Format explanation ── */}
+      <div className="card">
+        <div className="card-head">
+          <h3>匯入格式說明</h3>
+          <span className="tag">CSV / Excel</span>
+        </div>
+        <div className="card-body">
+          <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+            匯入檔案（.csv 或 .xlsx）第一列為欄位標題，資料從第二列起。系統以「項目名稱」為唯一索引，重複項目將自動更新。
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table className="dt" style={{ width: "100%", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th>欄位名稱</th>
+                  <th style={{ textAlign: "center" }}>必填</th>
+                  <th>說明</th>
+                  <th>範例</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ["案件名稱",                   "✓", "預算單的唯一識別名稱",          "2024-Q1-ERP升級計畫"],
+                  ["判定類別",                   "✓", "業務類別（設備擴充、工程擴廠…）","設備擴充 (UTI)"],
+                  ["判定系統",                   "",  "子系統或細項名稱",              "CIM相關"],
+                  ["負責專家",                   "",  "指定審核專家的姓名",             "王小明"],
+                  ["金額",                       "✓", "預算金額（純數字，不含逗號）",   "1500000"],
+                  ["原因",                       "",  "AI 初審意見說明",                "符合採購規範"],
+                  ["最終決策",                   "",  "通過 或 退件",                   "通過"],
+                  ["AI對於保留案件的信心分數",   "",  "0–100 的整數信心分數",           "85"],
+                  ["備註",                       "",  "補充說明",                       "—"],
+                ].map(([col, req, desc, ex]) => (
+                  <tr key={col}>
+                    <td><code style={{ fontSize: 12 }}>{col}</code></td>
+                    <td style={{ textAlign: "center", color: req ? "var(--accent)" : "var(--text-muted)", fontWeight: req ? 700 : 400 }}>{req || "—"}</td>
+                    <td style={{ color: "var(--text-muted)", fontSize: 12.5 }}>{desc}</td>
+                    <td style={{ fontFamily: "monospace", color: "var(--text-subtle)", fontSize: 12 }}>{ex}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 14, padding: "10px 14px", background: "var(--surface-2)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.7 }}>
+            💡 <b>提示：</b>可先點「匯出 CSV」下載現有待簽核資料作為範本，填寫後再匯入。匯入時欄位名稱若不符合上表將略過該欄位，不影響其他欄位匯入。
+          </div>
+        </div>
+      </div>
+
+      {/* ── Quick reference: Status lifecycle ── */}
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="card-head"><h3>狀態說明</h3></div>
+        <div className="card-body tight">
+          {[
+            ["AI_REVIEW",      "#7c3aed", "待派發",    "AI 初審完成，等待管理員指定專家"],
+            ["EXPERT_REVIEW",  "#06b6d4", "待專家審核", "已派發給專家，等待專家填寫評論"],
+            ["PENDING_ACTION", "#f59e0b", "退回補件",   "專家退件，等待申請人補充資料後重送"],
+            ["CLOSED",         "#10b981", "已簽核完成", "管理員簽核通過，結案"],
+            ["REJECTED",       "#ef4444", "已退件",     "案件最終退件"],
+          ].map(([s, col, label, desc]) => (
+            <div key={s} style={{ display: "grid", gridTemplateColumns: "130px 100px 1fr", alignItems: "center",
+                                   padding: "10px 14px", borderBottom: "1px solid var(--border)", gap: 12, fontSize: 13 }}>
+              <div><span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4,
+                                   background: col + "22", color: col, fontSize: 11.5, fontWeight: 700, letterSpacing: "0.04em" }}>{s}</span></div>
+              <div style={{ fontWeight: 600 }}>{label}</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>{desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+Object.assign(window, { LibraryPage, AssignmentPage, PermissionsPage, ActivityPage, DataImportPage });

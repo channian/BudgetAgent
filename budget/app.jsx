@@ -144,9 +144,13 @@ function App() {
     setFromRoute(source || route);
     setRoute("detail");
   };
-  const goNew      = ()  => { setCurrentBudget(null); setRoute("new"); };
+  const goNew      = ()  => { setCurrentBudget(null); setFromRoute(route); setRoute("new"); };
   const goEdit     = (b) => { setCurrentBudget(b); setRoute("edit"); };
-  const goList     = ()  => setRoute(fromRoute === "expert_review" ? "expert_review" : "pending");
+  const goList     = ()  => {
+    if (fromRoute === "expert_review") setRoute("expert_review");
+    else if (fromRoute === "data_import") setRoute("data_import");
+    else setRoute("pending");
+  };
 
   const approve = async (b, comment) => {
     try {
@@ -196,7 +200,7 @@ function App() {
       } else {
         await API.createBudget(form);
       }
-      setRoute("pending");
+      setRoute(fromRoute === "data_import" ? "data_import" : "pending");
     } catch (e) { setApiError(e.message); }
   };
 
@@ -223,8 +227,11 @@ function App() {
   } else if (route === "library") {
     body   = <LibraryPage currentUser={user} />;
     crumbs = ["AI Agent 圖書館"];
+  } else if (route === "data_import") {
+    body   = <DataImportPage onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} />;
+    crumbs = ["前端資料導入"];
   } else if (route === "assignment") {
-    body   = <AssignmentPage />;
+    body   = <AssignmentPage currentUser={user} />;
     crumbs = ["派發中心人員設定"];
   } else if (route === "permissions") {
     body   = <PermissionsPage currentUser={user} />;

@@ -228,6 +228,10 @@ async function apiRejectBudget(dbId, comment, final = false) {
   const d = await apiFetch(`/api/budgets/${dbId}/reject`, { method: "POST", body: JSON.stringify({ comment, final }) });
   return dbToFrontend(d.budget);
 }
+async function apiReassign(dbId, data) {
+  const d = await apiFetch(`/api/budgets/${dbId}/reassign`, { method: "POST", body: JSON.stringify(data) });
+  return d;
+}
 async function apiDeleteBudget(dbId, reason) {
   await apiFetch(`/api/budgets/${dbId}`, { method: "DELETE", body: JSON.stringify({ reason }) });
 }
@@ -397,6 +401,7 @@ window.API = {
   saveReview:          apiSaveReview,
   saveBudgetNo:        apiSaveBudgetNo,
   dispatch:            apiDispatchBudget,
+  reassign:            apiReassign,
   fetchTimeline:       apiFetchTimeline,
   batchSign:           apiBatchSign,
   acquireLock:         apiAcquireLock,
