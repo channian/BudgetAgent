@@ -544,16 +544,10 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const _runImport = async (file, sheet) => {
     try {
       const result = await API.importBudgets(file, { sheet, mode: "completed" });
-      const cnt   = result.inserted  ?? result.created ?? 0;
-      const skip  = result.skipped   ?? 0;
-      const total = result.total_rows ?? (cnt + skip + (result.errors?.length ?? 0));
-      const errs  = result.errors    ?? [];
-      const text  = `匯入完成：Excel 共 ${total} 列 → 新增/更新 ${cnt} 筆，略過空列 ${skip} 筆` +
-                    (errs.length ? `，錯誤 ${errs.length} 列` : "");
-      setImpMsg({ ok: errs.length === 0, text, errors: errs });
+      setImpMsg(API.formatImportResult(result));
       onRefresh && onRefresh();
     } catch (err) {
-      setImpMsg({ ok: false, text: "⚠ 匯入失敗：" + err.message, errors: [] });
+      setImpMsg({ ok: false, text: "⚠ 匯入失敗：" + err.message, errors: [], detail: [] });
     } finally {
       setBusy(false);
     }
@@ -882,12 +876,19 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
                 <span style={{ flex: 1 }}>{impMsg.text}</span>
                 <button onClick={() => setImpMsg(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 600 }}>✕</button>
               </div>
-              {impMsg.errors && impMsg.errors.length > 0 && (
+              {((impMsg.detail && impMsg.detail.length > 0) || (impMsg.errors && impMsg.errors.length > 0)) && (
                 <div style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.75, marginBottom: 4 }}>錯誤明細（前 {impMsg.errors.length} 列）：</div>
-                  {impMsg.errors.map((e, i) => (
-                    <div key={i} className="mono" style={{ fontSize: 11, opacity: 0.85 }}>{e}</div>
+                  {(impMsg.detail || []).map((d, i) => (
+                    <div key={"d" + i} style={{ fontSize: 11, opacity: 0.85, lineHeight: 1.5 }}>{d}</div>
                   ))}
+                  {impMsg.errors && impMsg.errors.length > 0 && (
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.75, margin: "4px 0" }}>錯誤明細（前 {impMsg.errors.length} 列）：</div>
+                      {impMsg.errors.map((e, i) => (
+                        <div key={"e" + i} className="mono" style={{ fontSize: 11, opacity: 0.85 }}>{e}</div>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
             </div>

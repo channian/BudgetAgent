@@ -957,16 +957,64 @@ COMPLETED_IMPORT_ALIASES = {
 }
 
 
+def _norm_header(s):
+    """Normalise a header cell for tolerant matching: strip, lowercase,
+    and remove whitespace / brackets / punctuation that varies between files."""
+    s = str(s).strip().lower()
+    for ch in (" ", "　", "\t", "\n", "\r", "(", ")", "（", "）",
+               "[", "]", "．", ".", "_", "-", "/", "\\", "$", "：", ":"):
+        s = s.replace(ch, "")
+    return s
+
+
 def _resolve_header(header, aliases=None):
+    """Map each logical field to a column index, tolerant of header-text
+    variations. Three passes (most-strict first), never reusing a column:
+      1) exact (stripped) match
+      2) normalised exact match (whitespace/bracket/case-insensitive)
+      3) normalised prefix match (e.g. '金額(NT$)' ← alias '金額')
+    """
     if aliases is None:
         aliases = IMPORT_ALIASES
-    norm = {str(h).strip(): i for i, h in enumerate(header)}
-    idx = {}
+
+    raw, norm = {}, {}
+    for i, h in enumerate(header):
+        if h is None:
+            continue
+        raw.setdefault(str(h).strip(), i)
+        norm.setdefault(_norm_header(h), i)
+
+    idx, used = {}, set()
+
+    # Pass 1 — exact stripped match
     for field, alts in aliases.items():
         for a in alts:
-            if a in norm:
-                idx[field] = norm[a]
-                break
+            key = str(a).strip()
+            if key in raw and raw[key] not in used:
+                idx[field] = raw[key]; used.add(raw[key]); break
+
+    # Pass 2 — normalised exact match
+    for field, alts in aliases.items():
+        if field in idx:
+            continue
+        for a in alts:
+            k = _norm_header(a)
+            if k and k in norm and norm[k] not in used:
+                idx[field] = norm[k]; used.add(norm[k]); break
+
+    # Pass 3 — normalised prefix match (alias is a prefix of the header)
+    for field, alts in aliases.items():
+        if field in idx:
+            continue
+        for a in alts:
+            k = _norm_header(a)
+            if not k or len(k) < 2:
+                continue
+            hit = next((j for hn, j in norm.items()
+                        if j not in used and hn.startswith(k)), None)
+            if hit is not None:
+                idx[field] = hit; used.add(hit); break
+
     return idx
 
 
@@ -1018,6 +1066,77 @@ def _parse_cycle(v):
         return int(float(m.group()))
     except ValueError:
         return None
+
+
+# ── Category derivation from (系統, 專家) ──────────────────────────────
+# The completed-history Excel only carries 系統 (sub_category) + Owner (專家),
+# not the top-level 類別 (category). This table lets us back-fill category
+# from the (sub_category, expert) pair. Keys use the canonical category names
+# already used by pipeline_1 / CAT_NAME_TO_ID so chip colours stay consistent.
+CATEGORY_SYSTEM_EXPERTS = {
+    "設備擴充 (UTI)": {
+        "空調": ["Jackie"],
+        "空壓": ["Yubin"],
+        "水務": ["Yichi"],
+        "抽氣": ["Yichi"],
+        "電力": ["Meko"],
+    },
+    "工程擴廠 (新工)": {
+        "二次配":   ["CC", "Asheng", "Matt"],
+        "Relayout": ["CC", "Asheng", "Matt"],
+        "空調": ["Asheng", "Shiou", "Yufong"],
+        "空壓": ["Asheng", "JinCR", "Jin", "Poli"],
+        "水務": ["Yanfang", "Fslin"],
+        "抽氣": ["Yanfang", "Mex"],
+        "電力": ["Asheng"],
+    },
+    "CIM相關": {
+        "監控":     ["Hank"],
+        "AI自動化": ["Huching"],
+    },
+    "法遵 (ESH)": {
+        "消防": ["Minghua", "CT"],
+        "建管": ["Minghua", "CT"],
+        "環保": ["Tingyu", "Chipin"],
+        "安全": ["Camilla", "Yuyun"],
+    },
+}
+
+
+def _build_category_indexes():
+    """Build reverse lookups from the (category → 系統 → [專家]) table."""
+    pair, by_expert, by_system = {}, {}, {}
+    for cat, systems in CATEGORY_SYSTEM_EXPERTS.items():
+        for sysname, experts in systems.items():
+            by_system.setdefault(sysname.strip().lower(), set()).add(cat)
+            for e in experts:
+                e = (e or "").strip()
+                if not e:
+                    continue
+                pair[(sysname.strip().lower(), e.lower())] = cat
+                by_expert.setdefault(e.lower(), set()).add(cat)
+    return pair, by_expert, by_system
+
+
+_CAT_PAIR_IDX, _CAT_EXPERT_IDX, _CAT_SYSTEM_IDX = _build_category_indexes()
+
+
+def _derive_category(sub_category, expert_name):
+    """Best-effort top-level 類別 from (系統, 專家). Returns None if undecidable."""
+    sub = (sub_category or "").strip().lower()
+    exp = (expert_name or "").strip().lower()
+    # 1) exact (系統, 專家) pair — most precise
+    if (sub, exp) in _CAT_PAIR_IDX:
+        return _CAT_PAIR_IDX[(sub, exp)]
+    # 2) 專家 alone, if it maps to exactly one category
+    cats = _CAT_EXPERT_IDX.get(exp)
+    if cats and len(cats) == 1:
+        return next(iter(cats))
+    # 3) 系統 alone, if unambiguous
+    scats = _CAT_SYSTEM_IDX.get(sub)
+    if scats and len(scats) == 1:
+        return next(iter(scats))
+    return None
 
 
 def _find_header_row(rows, max_scan=6):
@@ -1180,7 +1299,10 @@ def _import_completed(header, raw_rows, user):
         ), 400
 
     _, iso_week, _ = datetime.datetime.now().isocalendar()
-    inserted, skipped, errors = 0, 0, []
+    created, updated, skipped, errors = 0, 0, 0, []
+    derived_cat = 0           # how many rows had category back-filled from (系統,專家)
+    seen_names  = set()       # project names already encountered in THIS file
+    dup_in_file = 0           # duplicate project_name rows within the upload
     total_data_rows = sum(1 for r in raw_rows if any(v is not None and str(v).strip() for v in r))
 
     def cell(row, field):
@@ -1203,6 +1325,9 @@ def _import_completed(header, raw_rows, user):
                 if not project:
                     skipped += 1
                     continue
+                if project in seen_names:
+                    dup_in_file += 1
+                seen_names.add(project)
                 cur.execute("SAVEPOINT _row")
                 try:
                     decision  = cell(row, "expert_decision") or ""
@@ -1213,6 +1338,12 @@ def _import_completed(header, raw_rows, user):
                     d_date    = _parse_date(raw_cell(row, "dispatch_date"))
                     s_date    = _parse_date(raw_cell(row, "sign_date"))
                     cycle     = _parse_cycle(cell(row, "cycle_time"))
+                    sub_cat   = cell(row, "sub_category")
+                    exp_nm    = cell(row, "expert_name")
+                    # Excel carries no top-level 類別 — back-fill from (系統,專家)
+                    category  = cell(row, "category") or _derive_category(sub_cat, exp_nm)
+                    if category and not cell(row, "category"):
+                        derived_cat += 1
 
                     cur.execute(
                         """INSERT INTO budget.budget_requests
@@ -1223,7 +1354,7 @@ def _import_completed(header, raw_rows, user):
                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                            ON CONFLICT (project_name) DO UPDATE SET
                                week            = EXCLUDED.week,
-                               category        = EXCLUDED.category,
+                               category        = COALESCE(EXCLUDED.category, budget_requests.category),
                                sub_category    = COALESCE(EXCLUDED.sub_category, budget_requests.sub_category),
                                expert_name     = COALESCE(EXCLUDED.expert_name, budget_requests.expert_name),
                                budget_no       = COALESCE(EXCLUDED.budget_no, budget_requests.budget_no),
@@ -1236,29 +1367,40 @@ def _import_completed(header, raw_rows, user):
                                cycle_time      = EXCLUDED.cycle_time,
                                note            = EXCLUDED.note,
                                status          = EXCLUDED.status
-                           RETURNING id""",
-                        (project, wk, cell(row, "category"), cell(row, "sub_category"),
-                         cell(row, "expert_name"), cell(row, "budget_no"),
+                           RETURNING (xmax = 0) AS was_insert""",
+                        (project, wk, category, sub_cat,
+                         exp_nm, cell(row, "budget_no"),
                          cell(row, "owner"), amount, cell(row, "expert_comment"),
                          exp_dec, d_date, s_date, cycle, cell(row, "note"), status),
                     )
-                    row_result = cur.fetchone()
+                    res = cur.fetchone()
                     cur.execute("RELEASE SAVEPOINT _row")
-                    if row_result:
-                        inserted += 1
+                    if res and res["was_insert"]:
+                        created += 1
                     else:
-                        skipped += 1
+                        updated += 1
                 except Exception as row_err:
                     cur.execute("ROLLBACK TO SAVEPOINT _row")
                     errors.append(f"第 {n} 列：{row_err}")
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-    _audit_and_notify(user, inserted, skipped)
+    # Diagnostics: which logical field matched which Excel header
+    detected = {f: str(header[idx[f]]).strip() for f in idx}
+    unmatched = [f for f in COMPLETED_IMPORT_ALIASES if f not in idx]
+
+    _audit_and_notify(user, created + updated, skipped)
     return jsonify(
-        inserted=inserted,
+        inserted=created + updated,   # backward-compat
+        created=created,
+        updated=updated,
         skipped=skipped,
+        dup_in_file=dup_in_file,
+        derived_category=derived_cat,
         total_rows=total_data_rows,
+        distinct_names=len(seen_names),
+        detected_columns=detected,
+        unmatched_fields=unmatched,
         errors=errors[:50],   # return up to 50 error lines for diagnostics
     )
 

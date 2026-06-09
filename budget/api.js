@@ -352,6 +352,49 @@ async function apiImportBudgets(file, options = {}) {
   return body;
 }
 
+// Friendly Chinese labels for the completed-import diagnostic fields
+const IMPORT_FIELD_LABELS = {
+  project_name: "Project Name", week: "週數(w)", category: "類別(自動推導)",
+  sub_category: "系統(Excel 類別)", expert_name: "Owner→負責專家", budget_no: "BudgetNo.",
+  owner: "預算負責人", amount: "金額", expert_comment: "專家評論",
+  expert_decision: "審核處置", dispatch_date: "派送日期", sign_date: "簽核日期",
+  cycle_time: "Cycle time", note: "備註",
+};
+
+// Build a { ok, text, errors[], detail[] } banner object from an import result
+function formatImportResult(result) {
+  const total    = result.total_rows     ?? 0;
+  const created  = result.created        ?? result.inserted ?? 0;
+  const updated  = result.updated        ?? 0;
+  const skip     = result.skipped        ?? 0;
+  const dup      = result.dup_in_file    ?? 0;
+  const derived  = result.derived_category ?? 0;
+  const distinct = result.distinct_names ?? (created + updated);
+  const errs     = result.errors         ?? [];
+  const detected = result.detected_columns ?? {};
+  // category is derived, not read from Excel → not a real "missing" warning
+  const unmatched = (result.unmatched_fields ?? []).filter(f => f !== "category");
+
+  let text = `匯入完成：Excel 共 ${total} 列 → 新建 ${created} 筆、更新 ${updated} 筆（DB 不重複案件 ${distinct} 筆）`;
+  const bits = [];
+  if (skip)    bits.push(`略過空白 ${skip} 列`);
+  if (dup)     bits.push(`檔內同名 ${dup} 列已覆寫`);
+  if (derived) bits.push(`自動補類別 ${derived} 筆`);
+  if (errs.length) bits.push(`錯誤 ${errs.length} 列`);
+  if (bits.length) text += "；" + bits.join("、");
+
+  const detail = [];
+  if (Object.keys(detected).length) {
+    detail.push("欄位對應：" + Object.entries(detected)
+      .map(([f, h]) => `${IMPORT_FIELD_LABELS[f] || f}←「${h}」`).join("　"));
+  }
+  if (unmatched.length) {
+    detail.push("⚠ 未對應欄位：" + unmatched.map(f => IMPORT_FIELD_LABELS[f] || f).join("、")
+      + "（Excel 標題沒比對上，該欄資料不會匯入）");
+  }
+  return { ok: errs.length === 0 && unmatched.length === 0, text, errors: errs, detail };
+}
+
 // ── Attachments ───────────────────────────────────────────────────────
 async function apiUploadAttachment(budgetId, file) {
   const fd = new FormData();
@@ -474,6 +517,7 @@ window.API = {
   exportBudgets:       apiExportBudgets,
   getImportSheets:     apiGetImportSheets,
   importBudgets:       apiImportBudgets,
+  formatImportResult,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
   lookupEmployee:      apiLookupEmployee,
