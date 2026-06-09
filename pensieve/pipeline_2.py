@@ -71,18 +71,27 @@ def _read_clipboard() -> str:
 
 
 def _parse_clipboard(text: str) -> list:
-    """從文字解析 JSON 陣列；允許前後有多餘說明文字。"""
+    """從文字解析案件陣列；支援頂層陣列或 {"案件審核結果":[...]} 包裝物件格式。"""
     text = text.strip()
     if not text:
         return []
-    # 直接解析
+    # 直接解析：頂層陣列 或 包裝物件
     try:
         data = json.loads(text)
         if isinstance(data, list):
             return data
+        if isinstance(data, dict):
+            # 支援 {"案件審核結果":[...]} 或任何 dict 內唯一的 list 值
+            for key in ("案件審核結果", "results", "data", "cases"):
+                if isinstance(data.get(key), list):
+                    return data[key]
+            # 若 dict 只有一個 list 值，直接取出
+            list_vals = [v for v in data.values() if isinstance(v, list)]
+            if len(list_vals) == 1:
+                return list_vals[0]
     except json.JSONDecodeError:
         pass
-    # 擷取第一個 [...] 區塊
+    # 擷取第一個 [...] 區塊（前後有多餘說明文字時的 fallback）
     m = re.search(r"\[.*\]", text, re.DOTALL)
     if m:
         try:
@@ -340,13 +349,14 @@ def process():
 
         cls = _find_classification(name, cls_map)
         if not cls:
-            print(f"  ⚠️  找不到「{name}」的分類資訊，分類欄位將留空")
+            print(f"  ⚠️  找不到「{name}」的分類資訊，改用 AI 輸出中的分類欄位")
 
+        # system_defined.json 優先；找不到時用 AI 輸出中 echo 回來的分類欄位
         merged.append({
             "案件名稱":              name,
-            "判定類別":              cls.get("判定類別"),
-            "判定系統":              cls.get("判定系統"),
-            "負責專家":              cls.get("負責專家"),
+            "判定類別":              cls.get("判定類別") or item.get("判定類別"),
+            "判定系統":              cls.get("判定系統") or item.get("判定系統"),
+            "負責專家":              cls.get("負責專家") or item.get("負責專家"),
             "最終決策":              item.get("最終決策"),
             "AI對於保留案件的信心分數": item.get("AI對於保留案件的信心分數") or item.get("信心分數") or 0,
             "原因":                  item.get("原因", ""),
