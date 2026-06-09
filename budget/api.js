@@ -450,6 +450,10 @@ async function apiUpdateRagSystem(id, form) {
 async function apiDeleteRagSystem(id) {
   await apiFetch(`/api/rag/systems/${id}`, { method: "DELETE" });
 }
+async function apiReseedRagSystems() {
+  const d = await apiFetch("/api/rag/systems/reseed", { method: "POST" });
+  return d;
+}
 async function apiFetchRagEntries(sysId, filters = {}) {
   const clean = {};
   Object.entries(filters).forEach(([k, v]) => { if (v) clean[k] = v; });
@@ -532,6 +536,7 @@ window.API = {
   createRagSystem:     apiCreateRagSystem,
   updateRagSystem:     apiUpdateRagSystem,
   deleteRagSystem:     apiDeleteRagSystem,
+  reseedRagSystems:    apiReseedRagSystems,
   fetchRagEntries:     apiFetchRagEntries,
   createRagEntry:      apiCreateRagEntry,
   updateRagEntry:      apiUpdateRagEntry,

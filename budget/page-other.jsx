@@ -7,18 +7,28 @@ const EMPTY_ENTRY      = { title: "", keywords: "", content: "", example: "", di
 // Icons for the 5 entry categories
 const CAT_ICONS = { "歷史資料": "📋", "料單": "📦", "外部資料": "🌐", "其他": "📁", "待定": "⏳" };
 
+// Category display order and color scheme for the library
+const LIB_CATEGORIES = ["設備擴充 (UTI)", "工程擴廠 (新工)", "CIM相關", "法遵 (ESH)"];
+const LIB_CAT_COLORS = {
+  "設備擴充 (UTI)":  { bg: "#e0f2fe", text: "#0369a1", dot: "#38bdf8" },
+  "工程擴廠 (新工)": { bg: "#f3e8ff", text: "#7e22ce", dot: "#a855f7" },
+  "CIM相關":         { bg: "#dcfce7", text: "#15803d", dot: "#4ade80" },
+  "法遵 (ESH)":      { bg: "#fef3c7", text: "#b45309", dot: "#fbbf24" },
+};
+
 function LibraryPage({ currentUser }) {
   const role    = currentUser?.role || "viewer";
   const isAdmin = role === "admin";
 
-  const [systems, setSystems] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [err,     setErr]     = React.useState("");
-  const [active,  setActive]  = React.useState(null);   // selected system → RAG detail
+  const [systems,    setSystems]    = React.useState([]);
+  const [loading,    setLoading]    = React.useState(true);
+  const [err,        setErr]        = React.useState("");
+  const [active,     setActive]     = React.useState(null);
+  const [reseedBusy, setReseedBusy] = React.useState(false);
 
   // system create/rename modal: null | "new" | system-object
   const [sysModal, setSysModal] = React.useState(null);
-  const [sysForm,  setSysForm]  = React.useState({ name: "", description: "" });
+  const [sysForm,  setSysForm]  = React.useState({ name: "", description: "", expert_name: "", category: "" });
   const [sysBusy,  setSysBusy]  = React.useState(false);
   const [sysErr,   setSysErr]   = React.useState("");
 
@@ -31,9 +41,15 @@ function LibraryPage({ currentUser }) {
   };
   React.useEffect(load, []);
 
-  const openNewSys  = () => { setSysForm({ name: "", description: "", expert_name: "" }); setSysErr(""); setSysModal("new"); };
-  const openEditSys = (s) => { setSysForm({ name: s.name, description: s.description || "", expert_name: s.expert_name || "" }); setSysErr(""); setSysModal(s); };
-  const closeSys    = () => setSysModal(null);
+  const openNewSys  = () => {
+    setSysForm({ name: "", description: "", expert_name: "", category: "" });
+    setSysErr(""); setSysModal("new");
+  };
+  const openEditSys = (s) => {
+    setSysForm({ name: s.name, description: s.description || "", expert_name: s.expert_name || "", category: s.category || "" });
+    setSysErr(""); setSysModal(s);
+  };
+  const closeSys = () => setSysModal(null);
 
   const saveSys = async () => {
     if (!sysForm.name.trim()) { setSysErr("系統名稱為必填"); return; }
@@ -41,8 +57,7 @@ function LibraryPage({ currentUser }) {
     try {
       if (sysModal === "new") await API.createRagSystem(sysForm);
       else                    await API.updateRagSystem(sysModal.id, sysForm);
-      closeSys();
-      load();
+      closeSys(); load();
     } catch (e) { setSysErr(e.message); }
     finally     { setSysBusy(false); }
   };
@@ -52,6 +67,30 @@ function LibraryPage({ currentUser }) {
     try { await API.deleteRagSystem(s.id); load(); }
     catch (e) { alert("刪除失敗：" + e.message); }
   };
+
+  const doReseed = async () => {
+    if (!confirm("將以官方名單取代所有「系統 XX」佔位符（有 RAG 資料的系統不受影響）。確定執行？")) return;
+    setReseedBusy(true);
+    try {
+      const r = await API.reseedRagSystems();
+      Toast.show(`✅ 重設完成：移除 ${r.deleted} 個佔位符，新增 ${r.added} 個系統`, "ok");
+      load();
+    } catch (e) { alert("重設失敗：" + e.message); }
+    finally { setReseedBusy(false); }
+  };
+
+  // Group systems by category in predefined order
+  const grouped = React.useMemo(() => {
+    const map = {};
+    systems.forEach(s => {
+      const cat = s.category || "其他";
+      if (!map[cat]) map[cat] = [];
+      map[cat].push(s);
+    });
+    const order = [...LIB_CATEGORIES, "其他",
+      ...Object.keys(map).filter(c => !LIB_CATEGORIES.includes(c) && c !== "其他")];
+    return order.filter(c => map[c]).map(c => ({ cat: c, items: map[c] }));
+  }, [systems]);
 
   // ── RAG detail view ──
   if (active) {
@@ -74,7 +113,12 @@ function LibraryPage({ currentUser }) {
         </div>
         <div className="actions">
           <button className="btn" onClick={load} disabled={loading}><Icon.Refresh/>{loading ? "載入中…" : "重新整理"}</button>
-          {isAdmin && <button className="btn accent" onClick={openNewSys}><Icon.Plus/>新增系統類別</button>}
+          {isAdmin && <>
+            <button className="btn ghost" onClick={doReseed} disabled={reseedBusy} title="以官方名單取代佔位符">
+              {reseedBusy ? "處理中…" : "重設為官方名單"}
+            </button>
+            <button className="btn accent" onClick={openNewSys}><Icon.Plus/>新增系統類別</button>
+          </>}
         </div>
       </div>
 
@@ -85,28 +129,54 @@ function LibraryPage({ currentUser }) {
       ) : systems.length === 0 ? (
         <div className="empty">尚無系統類別{isAdmin ? "，請點右上角「新增系統類別」" : ""}</div>
       ) : (
-        <div className="sys-grid">
-          {systems.map((s) => (
-            <div key={s.id} className="sys-card" onClick={() => setActive(s)}>
-              <div className="sys-card-top">
-                <div className="sys-av"><Icon.Book s={18}/></div>
-                {isAdmin && (
-                  <div className="sys-card-actions" onClick={(e) => e.stopPropagation()}>
-                    <button className="btn ghost sm" title="重新命名" onClick={() => openEditSys(s)}>✎</button>
-                    <button className="btn ghost sm" title="刪除" onClick={() => deleteSys(s)}>✕</button>
-                  </div>
-                )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+          {grouped.map(({ cat, items }) => {
+            const color = LIB_CAT_COLORS[cat] || { bg: "var(--surface-2)", text: "var(--text-muted)", dot: "var(--border-strong)" };
+            return (
+              <div key={cat}>
+                {/* Category header */}
+                <div className="lib-cat-header">
+                  <span className="lib-cat-dot" style={{ background: color.dot }}/>
+                  <span className="lib-cat-label" style={{ color: color.text, background: color.bg }}>
+                    {cat}
+                  </span>
+                  <span className="lib-cat-count">{items.length} 個系統</span>
+                </div>
+                <div className="sys-grid">
+                  {items.map((s) => {
+                    const experts = (s.expert_name || "").split(/[、,]/).map(e => e.trim()).filter(Boolean);
+                    return (
+                      <div key={s.id} className="sys-card" onClick={() => setActive(s)}>
+                        <div className="sys-card-top">
+                          <div className="sys-av" style={{ background: `linear-gradient(135deg, ${color.bg}, ${color.bg})`, color: color.text }}>
+                            <Icon.Book s={18}/>
+                          </div>
+                          {isAdmin && (
+                            <div className="sys-card-actions" onClick={(e) => e.stopPropagation()}>
+                              <button className="btn ghost sm" title="編輯" onClick={() => openEditSys(s)}>✎</button>
+                              <button className="btn ghost sm" title="刪除" onClick={() => deleteSys(s)}>✕</button>
+                            </div>
+                          )}
+                        </div>
+                        <h4 className="sys-name">{s.name}</h4>
+                        {experts.length > 0 && (
+                          <div className="sys-experts">
+                            {experts.map((e, i) => (
+                              <span key={i} className="sys-expert-chip">👤 {e}</span>
+                            ))}
+                          </div>
+                        )}
+                        {s.description && <div className="sys-desc">{s.description}</div>}
+                        <div className="sys-meta">
+                          <span><span className="sys-count">{s.entry_count}</span> 筆 RAG 資料</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <h4 className="sys-name">{s.name}</h4>
-              {s.description && <div className="sys-desc">{s.description}</div>}
-              <div className="sys-meta">
-                {s.expert_name && (
-                  <span className="sys-expert">👤 {s.expert_name}</span>
-                )}
-                <span className="sys-count">{s.entry_count}</span> 筆 RAG 資料
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -114,29 +184,37 @@ function LibraryPage({ currentUser }) {
       {sysModal && (
         <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 200, display: "grid", placeItems: "center" }}
              onClick={e => e.target === e.currentTarget && closeSys()}>
-          <div className="card" style={{ width: 420, maxWidth: "92vw", padding: 0 }}>
+          <div className="card" style={{ width: 440, maxWidth: "92vw", padding: 0 }}>
             <div className="card-head" style={{ padding: "16px 20px" }}>
-              <h3>{sysModal === "new" ? "新增系統類別" : `重新命名：${sysModal.name}`}</h3>
+              <h3>{sysModal === "new" ? "新增系統類別" : `編輯：${sysModal.name}`}</h3>
               <button className="btn ghost sm" onClick={closeSys}>✕</button>
             </div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div className="field">
+                <label>所屬類別</label>
+                <select value={sysForm.category} onChange={e => setSysForm(f => ({ ...f, category: e.target.value }))}>
+                  <option value="">— 選擇類別 —</option>
+                  {LIB_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="其他">其他</option>
+                </select>
+              </div>
+              <div className="field">
                 <label>系統名稱 <span className="req">*</span></label>
                 <input type="text" value={sysForm.name} autoFocus
                   onChange={e => setSysForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="例：ERP 採購系統"/>
+                  placeholder="例：空調"/>
+              </div>
+              <div className="field">
+                <label>負責專家（多人用「、」隔開）</label>
+                <input type="text" value={sysForm.expert_name}
+                  onChange={e => setSysForm(f => ({ ...f, expert_name: e.target.value }))}
+                  placeholder="例：王小明、李大華"/>
               </div>
               <div className="field">
                 <label>說明（選填）</label>
                 <input type="text" value={sysForm.description}
                   onChange={e => setSysForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="此系統類別的用途簡述"/>
-              </div>
-              <div className="field">
-                <label>負責專家（選填）</label>
-                <input type="text" value={sysForm.expert_name}
-                  onChange={e => setSysForm(f => ({ ...f, expert_name: e.target.value }))}
-                  placeholder="例：王小明"/>
               </div>
               {sysErr && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ {sysErr}</div>}
               <div className="flex-row" style={{ justifyContent: "flex-end", gap: 8 }}>
