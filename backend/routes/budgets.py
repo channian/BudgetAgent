@@ -1019,12 +1019,35 @@ def _resolve_header(header, aliases=None):
 
 
 def _parse_amount(v):
+    """Extract a numeric amount from anything: 1,234,567 / NT$1,234 / $1234 /
+    1234元 / 1.2 → float. Returns 0 when no number is present."""
     if v is None:
         return 0
+    if isinstance(v, (int, float)):
+        return float(v)
+    import re as _re
+    m = _re.search(r'-?\d[\d,]*(?:\.\d+)?', str(v))
+    if not m:
+        return 0
     try:
-        return float(str(v).replace(",", "").replace("NT$", "").strip())
+        return float(m.group().replace(",", ""))
     except ValueError:
         return 0
+
+
+def _parse_decision(v):
+    """Normalise an 審核處置 value to ('退件'|'通過'|None, status).
+    Accepts Chinese (退件/通過/核可…) and English (reject/approve/pass…)."""
+    raw = (v or "").strip()
+    low = raw.lower()
+    reject_kw  = ("退件", "退回", "拒")
+    approve_kw = ("通過", "核可", "核准", "核準")
+    if any(k in raw for k in reject_kw) or any(k in low for k in ("reject", "decline", "fail", "deny")):
+        return "退件", "REJECTED"
+    if any(k in raw for k in approve_kw) or any(k in low for k in ("approve", "pass", "accept", "通过")):
+        return "通過", "CLOSED"
+    # present-but-unrecognised → leave decision blank, treat as closed history
+    return None, "CLOSED"
 
 
 def _parse_week(v, default):
@@ -1326,9 +1349,7 @@ def _import_completed(header, raw_rows, user):
                     continue
                 cur.execute("SAVEPOINT _row")
                 try:
-                    decision  = cell(row, "expert_decision") or ""
-                    status    = "REJECTED" if "退件" in decision else "CLOSED"
-                    exp_dec   = "退件" if "退件" in decision else ("通過" if decision else None)
+                    exp_dec, status = _parse_decision(cell(row, "expert_decision"))
                     wk        = _parse_week(raw_cell(row, "week"), iso_week)
                     amount    = _parse_amount(cell(row, "amount"))
                     d_date    = _parse_date(raw_cell(row, "dispatch_date"))
