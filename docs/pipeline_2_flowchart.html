@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pipeline 2 — 剪貼簿 → DB 流程圖</title>
+<title>Pipeline 完整流程圖 (P1 → 線上AI → P2 → DB)</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
   body {
@@ -13,235 +13,205 @@
     font-family: "Noto Sans TC", "PingFang TC", sans-serif;
     color: #333;
   }
-  h1 {
-    font-size: 1.4rem;
-    color: #7c3aed;
-    margin-bottom: 4px;
-  }
-  p.subtitle {
-    font-size: 0.9rem;
-    color: #888;
-    margin-bottom: 24px;
-  }
-  .mermaid {
+  h1 { font-size: 1.4rem; color: #7c3aed; margin-bottom: 4px; }
+  p.subtitle { font-size: 0.9rem; color: #888; margin-bottom: 24px; }
+  .card {
     background: white;
     border-radius: 12px;
     padding: 32px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.07);
     overflow-x: auto;
+    margin-bottom: 24px;
   }
+  h2 { font-size: 1rem; color: #7c3aed; margin-top: 0; }
+  table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
+  th { background: #f8f4ff; padding: 8px; border: 1px solid #e2d8f4; text-align: left; }
+  td { padding: 8px; border: 1px solid #e2d8f4; }
+  code { background: #f1f5f9; border-radius: 3px; padding: 1px 5px; font-size: 0.82rem; }
+  .badge { border-radius: 4px; padding: 2px 8px; font-size: 0.82rem; display: inline-block; }
 </style>
 </head>
 <body>
-<h1>Pipeline 2 — 線上 AI 審核結果 剪貼簿 → 資料庫</h1>
-<p class="subtitle">pipeline_2.py / pipeline_2_normalize.py 完整流程</p>
+<h1>Pipeline 完整流程 — P1 → 線上 AI → P2 → DB</h1>
+<p class="subtitle">pipeline_1.py → 複製貼上 → 線上 AI 審核 → 複製貼上 → pipeline_2.py → PostgreSQL</p>
 
+<div class="card">
 <div class="mermaid">
 flowchart TD
-    %% ── 使用者操作 ──────────────────────────────────────────
-    U1([👤 使用者：\n將線上 AI 審核 JSON\n手動複製到剪貼簿\nCtrl+C])
-    U2([▶ 執行 pipeline_2.py])
 
-    %% ── 讀取剪貼簿 ─────────────────────────────────────────
-    CB1{嘗試 pyperclip\n.paste()}
-    CB2{嘗試 win32clipboard}
-    CB_EMPTY{剪貼簿\n是否為空?}
-    CB_FAIL([❌ 錯誤：\n剪貼簿為空\n請先複製 AI 結果])
+  %% ══════════════════════════════════
+  %%  PHASE 0 — 輸入來源
+  %% ══════════════════════════════════
+  SRC([📁 網路資料夾\n每個子資料夾 = 一個案件\n.pdf / .pptx / .docx\n.xlsx / .xlsm / .txt])
 
-    %% ── 解析 JSON ──────────────────────────────────────────
-    P1{直接 json.loads\n→ list?}
-    P2{dict 含\n案件審核結果 key?}
-    P3{dict 只有\n一個 list 值?}
-    P4{regex 提取\n\[...\] 區塊?}
-    P_FAIL([❌ 錯誤：\n無法解析 JSON\n顯示前 200 字])
-    PARSED([✅ 解析出 N 筆案件])
+  %% ══════════════════════════════════
+  %%  PHASE 1 — Pipeline 1
+  %% ══════════════════════════════════
+  P1_RUN([▶ 執行 pipeline_1.py])
 
-    %% ── 讀取分類資訊 ───────────────────────────────────────
-    CLS1{讀取\nsystem_defined.json}
-    CLS_WARN([⚠️ 找不到檔案\n分類欄位留空\n仍可繼續])
-    CLS_OK([📂 載入 M 筆\npipeline_1 分類資訊])
+  P1_READ[讀取文件\n提取全文]
+  P1_RULE{關鍵字規則\n判定系統}
+  P1_RULE_OK[規則命中\n→ 判定系統]
+  P1_LLM[本地 LLM\nOllama / Qwen 2.5 7b\n判定系統]
+  P1_LLM_OK[LLM 判定\n重試→模糊→兜底 Relayout\n保證零未知]
 
-    %% ── 逐筆合併 ───────────────────────────────────────────
-    MERGE_LOOP[/逐筆處理每個 AI 審核結果/]
-    NAME_CHK{有案件名稱?}
-    SKIP_NAME([⚠️ 略過：缺少案件名稱])
-    FIND_CLS{三階段比對\n①精確 ②正規化 ③模糊82%}
-    USE_AI_CLS([⚠️ 找不到分類\n改用 AI 輸出中的分類欄位])
-    MERGE_OK[合併：\n案件名稱 + 判定類別\n+ 判定系統 + 負責專家\n+ 最終決策 + 信心分數 + 原因]
+  P1_CAT[classify_category\n判定類別]
+  P1_EXP[EXPERT_DB\n分配負責專家]
 
-    %% ── 寫入資料庫 ─────────────────────────────────────────
-    DB_CONN{連線\nPostgreSQL\n10.10.28.170:5432}
-    DB_FAIL([❌ 無法連線資料庫\n顯示錯誤訊息])
-    DB_LOOP[/逐筆寫入/]
-    FIND_PROJ{三階段比對\n在 DB 中找案件}
-    FUZZY_LOG([🔀 記錄模糊匹配\nA → B])
-    SIG_CHK{簽名比對\nSHA-256\n資料是否相同?}
-    SKIP_SAME([⏭ 資料未變\n略過此筆])
-    STATUS_CHK{案件狀態?}
-    DO_UPDATE([🔄 UPDATE 現有案件\n更新 AI 欄位\nstatus 不變])
-    NEW_NAME{DB 中有\n已決定的舊案件?}
-    DO_SUPPLEMENT([📎 INSERT 補送\n名稱加（補送）\nnote 記錄原案 ID])
-    DO_INSERT([✅ INSERT 新增\nstatus = AI_REVIEW])
-    EXCEPT([❌ 例外：\nrollback + traceback])
-    DONE([🎉 完成\nN 成功 / M 失敗\n請重新整理平台])
+  P1_SAVE[💾 儲存\nsystem_defined.json\npytollm_output.json]
 
-    %% ── 連線 ──────────────────────────────────────────────
-    U1 --> U2
-    U2 --> CB1
-    CB1 -- 成功 --> CB_EMPTY
-    CB1 -- 失敗 --> CB2
-    CB2 -- 成功 --> CB_EMPTY
-    CB2 -- 失敗 --> CB_EMPTY
+  P1_CLIP{複製到剪貼簿}
+  P1_CLIP_OK([📋 剪貼簿\nJSON 陣列\n含案件名稱+分類+全文])
+  P1_CLIP_FILE([⚠️ 剪貼簿失敗\n存成 clipboard_output.txt\n需手動複製])
 
-    CB_EMPTY -- 是空的 --> CB_FAIL
-    CB_EMPTY -- 有內容 --> P1
+  %% ══════════════════════════════════
+  %%  PHASE 2 — 使用者 / RPA → 線上 AI
+  %% ══════════════════════════════════
+  U_PASTE([👤 使用者 / RPA\nCtrl+V 貼到線上 AI\n如 ChatGPT / Claude])
 
-    P1 -- 是 list --> PARSED
-    P1 -- 否 --> P2
-    P2 -- 是 --> PARSED
-    P2 -- 否 --> P3
-    P3 -- 是 --> PARSED
-    P3 -- 否 --> P4
-    P4 -- 成功 --> PARSED
-    P4 -- 失敗 --> P_FAIL
+  AI_REVIEW[🌐 線上 AI 審核\n依 audit_prompt.md 規則\n判定每個案件]
 
-    PARSED --> CLS1
-    CLS1 -- 存在 --> CLS_OK
-    CLS1 -- 不存在 --> CLS_WARN
+  AI_OUT([📄 線上 AI 輸出 JSON\n案件名稱 / 最終決策\n信心分數 / 原因])
 
-    CLS_OK --> MERGE_LOOP
-    CLS_WARN --> MERGE_LOOP
+  U_COPY([👤 使用者\nCtrl+C 複製 AI 輸出])
 
-    MERGE_LOOP --> NAME_CHK
-    NAME_CHK -- 無 --> SKIP_NAME
-    NAME_CHK -- 有 --> FIND_CLS
-    FIND_CLS -- 找到 --> MERGE_OK
-    FIND_CLS -- 找不到 --> USE_AI_CLS --> MERGE_OK
-    SKIP_NAME -.-> MERGE_LOOP
-    MERGE_OK -.-> MERGE_LOOP
+  %% ══════════════════════════════════
+  %%  PHASE 3 — Pipeline 2
+  %% ══════════════════════════════════
+  P2_RUN([▶ 執行 pipeline_2.py])
 
-    MERGE_LOOP -- 全部處理完 --> DB_CONN
-    DB_CONN -- 成功 --> DB_LOOP
-    DB_CONN -- 失敗 --> DB_FAIL
+  P2_CB[讀取剪貼簿\npyperclip → win32clipboard]
+  P2_CB_EMPTY{剪貼簿\n為空?}
+  P2_CB_FAIL([❌ 錯誤：剪貼簿為空\n請先複製 AI 輸出])
 
-    DB_LOOP --> FIND_PROJ
-    FIND_PROJ -- 找到不同名 --> FUZZY_LOG --> SIG_CHK
-    FIND_PROJ -- 找到同名 --> SIG_CHK
-    FIND_PROJ -- 找不到 --> STATUS_CHK
+  P2_PARSE{解析 JSON\n4 層 fallback}
+  P2_PARSE_FAIL([❌ 無法解析 JSON\n顯示前 200 字])
 
-    SIG_CHK -- 相同 --> SKIP_SAME
-    SIG_CHK -- 不同 --> STATUS_CHK
+  P2_CLS[載入 system_defined.json\npipeline_1 分類資訊]
 
-    STATUS_CHK -- 有現有案件且\n狀態非 DECIDED --> DO_UPDATE
-    STATUS_CHK -- 有現有案件且\n狀態是 DECIDED --> New_name_check
+  P2_MERGE[逐筆合併\n三階段比對 精確→正規化→模糊82%\n分類優先用 pipeline_1\n找不到才用 AI 輸出]
 
-    New_name_check[產生補送名稱]
-    New_name_check --> DO_SUPPLEMENT
-    STATUS_CHK -- 無現有案件 --> DO_INSERT
+  %% ══════════════════════════════════
+  %%  PHASE 4 — 寫入 DB
+  %% ══════════════════════════════════
+  DB_CONN{連線 PostgreSQL\n10.10.28.170:5432}
+  DB_FAIL([❌ 無法連線資料庫])
 
-    DO_UPDATE -.-> DB_LOOP
-    DO_SUPPLEMENT -.-> DB_LOOP
-    DO_INSERT -.-> DB_LOOP
-    SKIP_SAME -.-> DB_LOOP
+  DB_LOOP[逐筆處理]
 
-    DB_LOOP -- exception --> EXCEPT
-    EXCEPT -.-> DB_LOOP
-    DB_LOOP -- 全部完成 --> DONE
+  DB_FIND{DB 中找案件\n三階段比對}
+  DB_SIG{SHA-256 簽名\n資料相同?}
+  DB_SKIP([⏭ 略過：資料未變])
+  DB_STATUS{案件狀態}
 
-    %% ── 樣式 ──────────────────────────────────────────────
-    classDef user    fill:#f3e8ff,stroke:#7c3aed,color:#4c1d95
-    classDef ok      fill:#d1fae5,stroke:#10b981,color:#065f46
-    classDef fail    fill:#fee2e2,stroke:#ef4444,color:#991b1b
-    classDef warn    fill:#fef3c7,stroke:#f59e0b,color:#92400e
-    classDef db      fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
-    classDef process fill:#f1f5f9,stroke:#94a3b8,color:#334155
+  DB_UPDATE([🔄 UPDATE\n更新 AI 欄位])
+  DB_SUPP([📎 補送 INSERT\n名稱加「補送」])
+  DB_INSERT([✅ INSERT 新增\nstatus = AI_REVIEW])
+  DB_ERR([❌ 例外：rollback + traceback])
 
-    class U1,U2 user
-    class PARSED,CLS_OK,DO_UPDATE,DO_INSERT,DO_SUPPLEMENT,DONE ok
-    class CB_FAIL,P_FAIL,DB_FAIL,EXCEPT fail
-    class CLS_WARN,SKIP_NAME,SKIP_SAME,USE_AI_CLS,FUZZY_LOG warn
-    class DB_CONN,DB_LOOP,FIND_PROJ,SIG_CHK,STATUS_CHK db
-    class CB1,CB2,P1,P2,P3,P4,MERGE_LOOP,MERGE_OK,NAME_CHK,FIND_CLS,New_name_check process
+  DONE([🎉 完成\n請重新整理平台查看])
+
+  %% ══════════════════════════════════
+  %%  連線
+  %% ══════════════════════════════════
+  SRC --> P1_RUN --> P1_READ --> P1_RULE
+  P1_RULE -- 命中 --> P1_RULE_OK --> P1_CAT
+  P1_RULE -- 未知 --> P1_LLM --> P1_LLM_OK --> P1_CAT
+  P1_CAT --> P1_EXP --> P1_SAVE --> P1_CLIP
+  P1_CLIP -- 成功 --> P1_CLIP_OK
+  P1_CLIP -- 失敗 --> P1_CLIP_FILE
+
+  P1_CLIP_OK --> U_PASTE
+  P1_CLIP_FILE -.-> U_PASTE
+
+  U_PASTE --> AI_REVIEW --> AI_OUT --> U_COPY
+
+  U_COPY --> P2_RUN --> P2_CB --> P2_CB_EMPTY
+  P2_CB_EMPTY -- 是 --> P2_CB_FAIL
+  P2_CB_EMPTY -- 否 --> P2_PARSE
+  P2_PARSE -- 成功 --> P2_CLS --> P2_MERGE
+  P2_PARSE -- 失敗 --> P2_PARSE_FAIL
+
+  P2_MERGE --> DB_CONN
+  DB_CONN -- 成功 --> DB_LOOP
+  DB_CONN -- 失敗 --> DB_FAIL
+
+  DB_LOOP --> DB_FIND --> DB_SIG
+  DB_SIG -- 相同 --> DB_SKIP -.-> DB_LOOP
+  DB_SIG -- 不同 --> DB_STATUS
+
+  DB_STATUS -- 進行中狀態 --> DB_UPDATE -.-> DB_LOOP
+  DB_STATUS -- 已決定狀態 --> DB_SUPP -.-> DB_LOOP
+  DB_STATUS -- 全新案件 --> DB_INSERT -.-> DB_LOOP
+
+  DB_LOOP -- exception --> DB_ERR -.-> DB_LOOP
+  DB_LOOP -- 全部完成 --> DONE
+
+  %% ══════════════════════════════════
+  %%  樣式
+  %% ══════════════════════════════════
+  classDef src      fill:#fef3c7,stroke:#f59e0b,color:#78350f
+  classDef phase1   fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  classDef user     fill:#f0fdf4,stroke:#10b981,color:#064e3b
+  classDef online   fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+  classDef phase2   fill:#fce7f3,stroke:#ec4899,color:#831843
+  classDef db       fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  classDef ok       fill:#d1fae5,stroke:#10b981,color:#065f46
+  classDef fail     fill:#fee2e2,stroke:#ef4444,color:#991b1b
+  classDef warn     fill:#fef3c7,stroke:#f59e0b,color:#92400e
+
+  class SRC src
+  class P1_RUN,P1_READ,P1_RULE,P1_RULE_OK,P1_LLM,P1_LLM_OK,P1_CAT,P1_EXP,P1_SAVE,P1_CLIP phase1
+  class P1_CLIP_OK,U_PASTE,U_COPY user
+  class AI_REVIEW,AI_OUT online
+  class P2_RUN,P2_CB,P2_CB_EMPTY,P2_PARSE,P2_CLS,P2_MERGE phase2
+  class DB_CONN,DB_LOOP,DB_FIND,DB_SIG,DB_STATUS db
+  class DB_INSERT,DB_UPDATE,DB_SUPP,DONE ok
+  class P2_CB_FAIL,P2_PARSE_FAIL,DB_FAIL,DB_ERR fail
+  class P1_CLIP_FILE,DB_SKIP warn
+</div>
 </div>
 
-<div style="margin-top:32px; background:white; border-radius:12px; padding:24px; box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-  <h2 style="font-size:1rem; color:#7c3aed; margin-top:0;">圖例說明</h2>
-  <table style="border-collapse:collapse; font-size:0.85rem; width:100%;">
-    <tr>
-      <td style="padding:6px 16px 6px 0;"><span style="background:#f3e8ff;border:1px solid #7c3aed;border-radius:4px;padding:2px 8px;color:#4c1d95">紫色</span></td>
-      <td>使用者操作（複製剪貼簿、執行腳本）</td>
-    </tr>
-    <tr>
-      <td style="padding:6px 16px 6px 0;"><span style="background:#d1fae5;border:1px solid #10b981;border-radius:4px;padding:2px 8px;color:#065f46">綠色</span></td>
-      <td>成功路徑（解析成功、INSERT/UPDATE 成功）</td>
-    </tr>
-    <tr>
-      <td style="padding:6px 16px 6px 0;"><span style="background:#fee2e2;border:1px solid #ef4444;border-radius:4px;padding:2px 8px;color:#991b1b">紅色</span></td>
-      <td>錯誤終止（空剪貼簿、JSON 格式錯、DB 連線失敗）</td>
-    </tr>
-    <tr>
-      <td style="padding:6px 16px 6px 0;"><span style="background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;color:#92400e">黃色</span></td>
-      <td>警告（找不到分類、略過、模糊匹配）</td>
-    </tr>
-    <tr>
-      <td style="padding:6px 16px 6px 0;"><span style="background:#dbeafe;border:1px solid #3b82f6;border-radius:4px;padding:2px 8px;color:#1e3a8a">藍色</span></td>
-      <td>資料庫操作（連線、查找、簽名比對）</td>
-    </tr>
-  </table>
-
-  <h2 style="font-size:1rem; color:#7c3aed; margin-top:20px;">三階段比對邏輯</h2>
-  <table style="border-collapse:collapse; font-size:0.85rem; width:100%;">
-    <thead>
-      <tr style="background:#f8f4ff;">
-        <th style="padding:8px; border:1px solid #e2d8f4; text-align:left">階段</th>
-        <th style="padding:8px; border:1px solid #e2d8f4; text-align:left">方法</th>
-        <th style="padding:8px; border:1px solid #e2d8f4; text-align:left">說明</th>
-      </tr>
-    </thead>
+<div class="card">
+  <h2>四個階段說明</h2>
+  <table>
+    <thead><tr><th>階段</th><th>腳本</th><th>輸入</th><th>輸出</th></tr></thead>
     <tbody>
       <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">① 精確比對</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;"><code>name == key</code></td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">字串完全相同</td>
+        <td><span class="badge" style="background:#ede9fe;border:1px solid #7c3aed;color:#4c1d95">① Pipeline 1</span></td>
+        <td><code>pipeline_1.py</code></td>
+        <td>網路資料夾（各案件文件）</td>
+        <td><code>system_defined.json</code> + 結果複製到剪貼簿</td>
       </tr>
       <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">② 正規化比對</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">去除空格/符號/大小寫</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">「AI Agent (測試)」≈「AIAgent測試」</td>
+        <td><span class="badge" style="background:#dbeafe;border:1px solid #3b82f6;color:#1e3a8a">② 線上 AI 審核</span></td>
+        <td>手動 / RPA</td>
+        <td>剪貼簿（P1 輸出）→ 貼到 ChatGPT/Claude</td>
+        <td>每案件：最終決策 + 信心分數 + 原因</td>
       </tr>
       <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">③ 模糊比對</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;"><code>difflib ≥ 82%</code></td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">容許拼字差異</td>
+        <td><span class="badge" style="background:#fce7f3;border:1px solid #ec4899;color:#831843">③ 複製 AI 輸出</span></td>
+        <td>使用者 Ctrl+C</td>
+        <td>線上 AI 輸出 JSON</td>
+        <td>放入剪貼簿，供 P2 讀取</td>
+      </tr>
+      <tr>
+        <td><span class="badge" style="background:#e0f2fe;border:1px solid #0284c7;color:#0c4a6e">④ Pipeline 2</span></td>
+        <td><code>pipeline_2.py</code></td>
+        <td>剪貼簿（AI 審核結果）+ <code>system_defined.json</code></td>
+        <td>寫入 PostgreSQL <code>budget.budget_requests</code></td>
       </tr>
     </tbody>
   </table>
 
-  <h2 style="font-size:1rem; color:#7c3aed; margin-top:20px;">去重邏輯（DB 寫入判斷）</h2>
-  <table style="border-collapse:collapse; font-size:0.85rem; width:100%;">
-    <thead>
-      <tr style="background:#f8f4ff;">
-        <th style="padding:8px; border:1px solid #e2d8f4;">條件</th>
-        <th style="padding:8px; border:1px solid #e2d8f4;">動作</th>
-      </tr>
-    </thead>
+  <h2 style="margin-top:20px">DB 寫入去重邏輯</h2>
+  <table>
+    <thead><tr><th>情境</th><th>動作</th></tr></thead>
     <tbody>
-      <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">DB 無此案件</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">✅ INSERT（新增，status = AI_REVIEW）</td>
-      </tr>
-      <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">DB 有，簽名相同</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">⏭ 略過（資料未變）</td>
-      </tr>
-      <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">DB 有，簽名不同，狀態 = AI_REVIEW / EXPERT_REVIEW / PENDING_ACTION</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">🔄 UPDATE（更新 AI 欄位）</td>
-      </tr>
-      <tr>
-        <td style="padding:8px; border:1px solid #e2d8f4;">DB 有，已是 CLOSED / REJECTED，再次送入</td>
-        <td style="padding:8px; border:1px solid #e2d8f4;">📎 INSERT 補送（名稱加「（補送）」）</td>
-      </tr>
+      <tr><td>DB 無此案件</td><td>✅ INSERT，status = <code>AI_REVIEW</code></td></tr>
+      <tr><td>DB 有，簽名相同（資料未變）</td><td>⏭ 略過</td></tr>
+      <tr><td>DB 有，簽名不同，狀態 = AI_REVIEW / EXPERT_REVIEW / PENDING_ACTION</td><td>🔄 UPDATE 更新 AI 欄位</td></tr>
+      <tr><td>DB 有，狀態 = CLOSED / REJECTED，重新送入</td><td>📎 補送 INSERT（名稱加「（補送）」）</td></tr>
     </tbody>
   </table>
 </div>
