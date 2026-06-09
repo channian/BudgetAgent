@@ -187,9 +187,8 @@ function cycleTime(disp, sign) {
   if (!sign) return null;
   const ms = sign - disp;
   const hrs = ms / 3600000;
-  if (hrs < 24) return { hrs, label: `${hrs.toFixed(1)}h`, fast: hrs < 6 };
-  const days = hrs / 24;
-  return { hrs, label: `${days.toFixed(1)}d`, slow: days > 3 };
+  const days = Math.floor(hrs / 24);
+  return { hrs, label: `${days}d`, fast: days < 1, slow: days > 3 };
 }
 
 function nextDispatchNo(items) {

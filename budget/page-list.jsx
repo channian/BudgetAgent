@@ -233,7 +233,7 @@ function _computeStats(list) {
   const totalAmt  = list.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const cycled    = list.filter(b => b.cycleTime != null);
   const avgCycle  = cycled.length
-    ? Math.round(cycled.reduce((s, b) => s + Number(b.cycleTime), 0) / cycled.length * 10) / 10
+    ? Math.round(cycled.reduce((s, b) => s + Number(b.cycleTime), 0) / cycled.length)
     : null;
   return { total: list.length, passed, rejected, totalAmt, avgCycle };
 }
@@ -639,7 +639,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       if (b.cycleTime != null) { map[sys].total += Number(b.cycleTime); map[sys].cnt++; }
     });
     return Object.entries(map)
-      .map(([sys, d]) => ({ sys, avg: d.cnt ? Math.round(d.total / d.cnt * 10) / 10 : null, cnt: d.cnt }))
+      .map(([sys, d]) => ({ sys, avg: d.cnt ? Math.round(d.total / d.cnt) : null, cnt: d.cnt }))
       .sort((a, bv) => (bv.avg ?? -1) - (a.avg ?? -1));
   }, [completedView]);
 
