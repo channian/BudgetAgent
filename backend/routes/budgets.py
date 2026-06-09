@@ -1300,9 +1300,8 @@ def _import_completed(header, raw_rows, user):
 
     _, iso_week, _ = datetime.datetime.now().isocalendar()
     created, updated, skipped, errors = 0, 0, 0, []
-    derived_cat = 0           # how many rows had category back-filled from (系統,專家)
-    seen_names  = set()       # project names already encountered in THIS file
-    dup_in_file = 0           # duplicate project_name rows within the upload
+    derived_cat = 0           # rows that had 類別 back-filled from (系統,專家)
+    cycles_kept = 0           # rows kept as a separate review cycle (補送 suffix)
     total_data_rows = sum(1 for r in raw_rows if any(v is not None and str(v).strip() for v in r))
 
     def cell(row, field):
@@ -1325,9 +1324,6 @@ def _import_completed(header, raw_rows, user):
                 if not project:
                     skipped += 1
                     continue
-                if project in seen_names:
-                    dup_in_file += 1
-                seen_names.add(project)
                 cur.execute("SAVEPOINT _row")
                 try:
                     decision  = cell(row, "expert_decision") or ""
@@ -1345,40 +1341,64 @@ def _import_completed(header, raw_rows, user):
                     if category and not cell(row, "category"):
                         derived_cat += 1
 
+                    # Identity = (project_name, 派送日期). The same name with a
+                    # different 派送日期 is a separate review cycle (退件重審) and
+                    # must NOT be merged — store it under a 補送 suffix instead.
+                    like = (project.replace("\\", r"\\").replace("%", r"\%")
+                                    .replace("_", r"\_") + "（補送%")
                     cur.execute(
-                        """INSERT INTO budget.budget_requests
-                               (project_name, week, category, sub_category, expert_name,
-                                budget_no, owner, amount,
-                                expert_comment, expert_decision, dispatch_date, sign_date,
-                                cycle_time, note, status)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                           ON CONFLICT (project_name) DO UPDATE SET
-                               week            = EXCLUDED.week,
-                               category        = COALESCE(EXCLUDED.category, budget_requests.category),
-                               sub_category    = COALESCE(EXCLUDED.sub_category, budget_requests.sub_category),
-                               expert_name     = COALESCE(EXCLUDED.expert_name, budget_requests.expert_name),
-                               budget_no       = COALESCE(EXCLUDED.budget_no, budget_requests.budget_no),
-                               owner           = COALESCE(EXCLUDED.owner, budget_requests.owner),
-                               amount          = COALESCE(NULLIF(EXCLUDED.amount,0), budget_requests.amount),
-                               expert_comment  = EXCLUDED.expert_comment,
-                               expert_decision = EXCLUDED.expert_decision,
-                               dispatch_date   = EXCLUDED.dispatch_date,
-                               sign_date       = EXCLUDED.sign_date,
-                               cycle_time      = EXCLUDED.cycle_time,
-                               note            = EXCLUDED.note,
-                               status          = EXCLUDED.status
-                           RETURNING (xmax = 0) AS was_insert""",
-                        (project, wk, category, sub_cat,
-                         exp_nm, cell(row, "budget_no"),
-                         cell(row, "owner"), amount, cell(row, "expert_comment"),
-                         exp_dec, d_date, s_date, cycle, cell(row, "note"), status),
+                        "SELECT id, project_name, dispatch_date "
+                        "FROM budget.budget_requests "
+                        "WHERE project_name = %s OR project_name LIKE %s",
+                        (project, like),
                     )
-                    res = cur.fetchone()
-                    cur.execute("RELEASE SAVEPOINT _row")
-                    if res and res["was_insert"]:
-                        created += 1
-                    else:
+                    candidates = cur.fetchall()
+                    match_id, base_taken = None, False
+                    for c in candidates:
+                        if c["project_name"] == project:
+                            base_taken = True
+                        if match_id is None and _parse_date(c["dispatch_date"]) == d_date:
+                            match_id = c["id"]
+
+                    if match_id is not None:
+                        # Same case + same 派送日期 → refresh in place.
+                        cur.execute(
+                            """UPDATE budget.budget_requests SET
+                                   week=%s,
+                                   category=COALESCE(%s, category),
+                                   sub_category=COALESCE(%s, sub_category),
+                                   expert_name=COALESCE(%s, expert_name),
+                                   budget_no=COALESCE(%s, budget_no),
+                                   owner=COALESCE(%s, owner),
+                                   amount=COALESCE(NULLIF(%s,0), amount),
+                                   expert_comment=%s, expert_decision=%s,
+                                   dispatch_date=%s, sign_date=%s, cycle_time=%s,
+                                   note=%s, status=%s, updated_at=NOW()
+                               WHERE id=%s""",
+                            (wk, category, sub_cat, exp_nm, cell(row, "budget_no"),
+                             cell(row, "owner"), amount, cell(row, "expert_comment"),
+                             exp_dec, d_date, s_date, cycle, cell(row, "note"),
+                             status, match_id),
+                        )
                         updated += 1
+                    else:
+                        # New row. If the base name is taken (a different cycle
+                        # already exists), keep this one under a 補送 suffix.
+                        name = project if not base_taken else _next_supplement_name(cur, project)
+                        if base_taken:
+                            cycles_kept += 1
+                        cur.execute(
+                            """INSERT INTO budget.budget_requests
+                                   (project_name, week, category, sub_category, expert_name,
+                                    budget_no, owner, amount, expert_comment, expert_decision,
+                                    dispatch_date, sign_date, cycle_time, note, status)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            (name, wk, category, sub_cat, exp_nm, cell(row, "budget_no"),
+                             cell(row, "owner"), amount, cell(row, "expert_comment"),
+                             exp_dec, d_date, s_date, cycle, cell(row, "note"), status),
+                        )
+                        created += 1
+                    cur.execute("RELEASE SAVEPOINT _row")
                 except Exception as row_err:
                     cur.execute("ROLLBACK TO SAVEPOINT _row")
                     errors.append(f"第 {n} 列：{row_err}")
@@ -1395,10 +1415,9 @@ def _import_completed(header, raw_rows, user):
         created=created,
         updated=updated,
         skipped=skipped,
-        dup_in_file=dup_in_file,
+        cycles_kept=cycles_kept,
         derived_category=derived_cat,
         total_rows=total_data_rows,
-        distinct_names=len(seen_names),
         detected_columns=detected,
         unmatched_fields=unmatched,
         errors=errors[:50],   # return up to 50 error lines for diagnostics

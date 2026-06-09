@@ -363,22 +363,21 @@ const IMPORT_FIELD_LABELS = {
 
 // Build a { ok, text, errors[], detail[] } banner object from an import result
 function formatImportResult(result) {
-  const total    = result.total_rows     ?? 0;
-  const created  = result.created        ?? result.inserted ?? 0;
-  const updated  = result.updated        ?? 0;
-  const skip     = result.skipped        ?? 0;
-  const dup      = result.dup_in_file    ?? 0;
+  const total    = result.total_rows      ?? 0;
+  const created  = result.created         ?? result.inserted ?? 0;
+  const updated  = result.updated         ?? 0;
+  const skip     = result.skipped         ?? 0;
+  const cycles   = result.cycles_kept     ?? 0;
   const derived  = result.derived_category ?? 0;
-  const distinct = result.distinct_names ?? (created + updated);
-  const errs     = result.errors         ?? [];
+  const errs     = result.errors          ?? [];
   const detected = result.detected_columns ?? {};
   // category is derived, not read from Excel → not a real "missing" warning
   const unmatched = (result.unmatched_fields ?? []).filter(f => f !== "category");
 
-  let text = `匯入完成：Excel 共 ${total} 列 → 新建 ${created} 筆、更新 ${updated} 筆（DB 不重複案件 ${distinct} 筆）`;
+  let text = `匯入完成：Excel 共 ${total} 列 → 新建 ${created} 筆、更新 ${updated} 筆`;
   const bits = [];
   if (skip)    bits.push(`略過空白 ${skip} 列`);
-  if (dup)     bits.push(`檔內同名 ${dup} 列已覆寫`);
+  if (cycles)  bits.push(`同名不同派送日期 ${cycles} 筆已保留為獨立重審案`);
   if (derived) bits.push(`自動補類別 ${derived} 筆`);
   if (errs.length) bits.push(`錯誤 ${errs.length} 列`);
   if (bits.length) text += "；" + bits.join("、");
