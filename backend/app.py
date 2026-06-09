@@ -9,7 +9,7 @@ from routes.budgets import budgets_bp
 from routes.notifications import notifications_bp
 from routes.users import users_bp
 from routes.library import library_bp, init_library_schema
-from routes.budgets import init_lock_columns
+from routes.budgets import init_lock_columns, init_frontend_submitted_column
 from routes.attachments import attachments_bp, init_attachments_schema
 
 app = Flask(__name__)
@@ -28,6 +28,8 @@ app.register_blueprint(attachments_bp,   url_prefix="/api")
 init_library_schema()
 # Add concurrency lock columns if not already present
 init_lock_columns()
+# Add frontend_submitted flag column (tracks whether a human confirmed the case)
+init_frontend_submitted_column()
 # Create attachments table + uploads directory
 init_attachments_schema()
 

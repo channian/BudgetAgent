@@ -25,6 +25,23 @@ def init_lock_columns():
     except Exception:
         pass
 
+
+def init_frontend_submitted_column():
+    """Add frontend_submitted flag column if not present.
+
+    FALSE (default) = created by RPA/AI pipeline directly.
+    TRUE            = created or confirmed by a human via the frontend form.
+    Only cases that are TRUE + have AI data are eligible for 派發中心.
+    """
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute("""
+                ALTER TABLE budget.budget_requests
+                    ADD COLUMN IF NOT EXISTS frontend_submitted BOOLEAN DEFAULT FALSE
+            """)
+    except Exception:
+        pass
+
 # A case is "已審理" once the expert has acted on it (退件 / 補件 / 通過).
 # Re-ingesting changed data for such a case must NOT overwrite history —
 # it becomes a new 補送 case instead.
@@ -166,9 +183,19 @@ def create_budget():
             )
             existing = [row_to_dict(r) for r in cur.fetchall()]
 
-        # 1) Identical data already present → ignore (re-scan no-op).
+        # 1) Identical data already present → confirm if not yet frontend_submitted, else ignore.
         for ex in existing:
             if _case_signature(ex) == incoming_sig:
+                if not ex.get("frontend_submitted"):
+                    with db_cursor(commit=True) as cur:
+                        cur.execute(
+                            "UPDATE budget.budget_requests SET frontend_submitted=TRUE, updated_at=NOW() WHERE id=%s",
+                            (ex["id"],),
+                        )
+                    audit_log(ex["id"], "CONFIRM_FRONTEND", user.get("name", "system"), ex, {"frontend_submitted": True})
+                    return jsonify(id=ex["id"], status=ex["status"], action="confirmed",
+                                   project_name=ex["project_name"],
+                                   message="已確認為前端案件，準備進入派發中心。"), 200
                 return jsonify(id=ex["id"], status=ex["status"], action="ignored",
                                project_name=ex["project_name"],
                                message="資料未變更，已存在相同案件，已略過。"), 200
@@ -177,12 +204,34 @@ def create_budget():
 
         # 2) Case still under review, data changed → update in place.
         if latest and latest["status"] not in DECIDED_STATUSES:
+            # "Confirm" scenario: frontend submits with no AI data but existing case (from RPA) has AI data.
+            # Preserve AI data; just attach frontend_submitted flag and update human-editable fields.
+            if not ai_obj and latest.get("ai_result"):
+                with db_cursor(commit=True) as cur:
+                    cur.execute(
+                        """UPDATE budget.budget_requests SET
+                               category    = COALESCE(%s, category),
+                               sub_category= COALESCE(%s, sub_category),
+                               expert_name = COALESCE(%s, expert_name),
+                               owner       = COALESCE(%s, owner),
+                               frontend_submitted = TRUE,
+                               updated_at  = NOW()
+                           WHERE id=%s RETURNING *""",
+                        (data.get("category") or None, data.get("sub_category") or None,
+                         data.get("expert_name") or None, owner or None, latest["id"]),
+                    )
+                    after = row_to_dict(cur.fetchone())
+                audit_log(latest["id"], "CONFIRM_FRONTEND", user.get("name", "system"), latest, after)
+                return jsonify(id=latest["id"], status=after["status"], action="confirmed",
+                               project_name=after["project_name"],
+                               message="已與 AI 建單合併確認，準備進入派發中心。"), 200
+            # Normal update in place.
             with db_cursor(commit=True) as cur:
                 cur.execute(
                     """UPDATE budget.budget_requests SET
                            category=%s, sub_category=%s, expert_name=%s,
                            owner=%s, amount=%s, ai_comment=%s, ai_result=%s,
-                           status=%s, updated_at=NOW()
+                           status=%s, frontend_submitted=TRUE, updated_at=NOW()
                        WHERE id=%s RETURNING *""",
                     (data.get("category"), data.get("sub_category"),
                      data.get("expert_name"), owner, data.get("amount", 0),
@@ -208,8 +257,9 @@ def create_budget():
             cur.execute(
                 """INSERT INTO budget.budget_requests
                        (project_name, week, category, sub_category, expert_name,
-                        owner, amount, ai_comment, ai_result, status, note)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        owner, amount, ai_comment, ai_result, status, note,
+                        frontend_submitted)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
                    RETURNING id""",
                 (insert_name, iso_week, data.get("category"),
                  data.get("sub_category"), data.get("expert_name"), owner,
@@ -559,6 +609,30 @@ def release_lock(budget_id):
     except Exception:
         pass
     return jsonify(ok=True)
+
+
+# ── Frontend confirmation ─────────────────────────────────────────────
+@budgets_bp.post("/budgets/<int:budget_id>/confirm-frontend")
+@require_auth
+def confirm_frontend(budget_id):
+    """Mark an AI-created case as frontend-confirmed, making it eligible for 派發中心."""
+    user = current_user()
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests
+                   SET frontend_submitted=TRUE, updated_at=NOW()
+                   WHERE id=%s RETURNING *""",
+                (budget_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify(error="案件不存在"), 404
+            after = row_to_dict(row)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+    audit_log(budget_id, "CONFIRM_FRONTEND", user.get("name", "system"), None, after)
+    return jsonify(ok=True, id=after["id"], status=after["status"])
 
 
 # ── Expert review (save comment + recommendation, no finalise) ───────

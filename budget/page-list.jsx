@@ -410,9 +410,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
 
-  // Split pending into groups. Cases WITH AI data live in 派發中心 (待派發),
-  // so the 待簽核 page only surfaces cases still waiting for the AI pipeline.
-  const noAiCases      = allPending.filter(b => b.status === "AI_REVIEW" && !b.aiResult && !b.aiReason);
+  // Pending groups. AI_REVIEW cases without AI data live in 前端資料導入, not here.
   const readyToSign    = allPending.filter(b => b.status !== "AI_REVIEW" && hasComment(b));
   const awaitingExpert = allPending.filter(b => b.status !== "AI_REVIEW" && !hasComment(b));
 
@@ -640,7 +638,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
 
   const readyToSignView   = React.useMemo(() => applyView(readyToSign),    [applyView, budgets]);
   const awaitingExpertView= React.useMemo(() => applyView(awaitingExpert), [applyView, budgets]);
-  const noAiView          = React.useMemo(() => applyView(noAiCases),       [applyView, budgets]);
   const completedView     = React.useMemo(() => {
     let r = applyView(completed);
     if (filterStart) r = r.filter(b => b.signDate && b.signDate >= filterStart);
@@ -809,35 +806,6 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
       {/* ── 待簽核 main page ── */}
       {isPending && (
         <>
-          {/* Cases without AI data yet — waiting for pipeline.
-              Cases that already have AI data are handled in 派發中心, not here. */}
-          {noAiView.length > 0 && (
-            <div className="card" style={{ flexShrink: 0 }}>
-              <div className="card-head" style={{ background: "oklch(0.97 0.01 60)" }}>
-                <h3 style={{ color: "#92400e" }}>
-                  待 AI 處理
-                  <span className="block-tag" style={{ marginLeft: 8 }}>等待 AI pipeline 初審結果</span>
-                </h3>
-                <span className="hint">{noAiView.length} 件</span>
-              </div>
-              <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                <BudgetTable
-                  cols={[
-                    { k: "week",    label: "週數",       w: 78,  min: 60,  sortable: true },
-                    { k: "project", label: "項目名稱",   w: 280, min: 180 },
-                    { k: "owner",   label: "預算負責人", w: 130, min: 100 },
-                    { k: "amount",  label: "金額 (NT$)", w: 130, min: 110, align: "right", sortable: true },
-                    { k: "status",  label: "狀態",       w: 110, min: 90  },
-                  ]}
-                  rows={noAiView}
-                  onRow={onRow}
-                  sort={sort} toggleSort={toggleSort} arr={arr}
-                  startColResize={startColResize} setCols={setCols}
-                />
-              </div>
-            </div>
-          )}
-
           <div className="block-head">
             <h3>待簽核 <span className="block-tag">專家評論完成，待簽核</span></h3>
             <span className="hint">{readyToSignView.length} 件</span>

@@ -142,7 +142,8 @@ function dbToFrontend(row) {
     status:        row.status,
     dispatchDate:  row.dispatch_date ? new Date(row.dispatch_date) : new Date(),
     signDate:      row.sign_date ? new Date(row.sign_date) : null,
-    cycleTime:     row.cycle_time,
+    cycleTime:        row.cycle_time,
+    frontendSubmitted: !!row.frontend_submitted,
     notes:         row.note || "",
     updatedAt:     row.dispatch_date ? new Date(row.dispatch_date) : null,
   };
@@ -280,6 +281,9 @@ async function apiAcquireLock(dbId) {
 }
 async function apiReleaseLock(dbId) {
   return apiFetch(`/api/budgets/${dbId}/lock`, { method: "DELETE" });
+}
+async function apiConfirmFrontend(dbId) {
+  return apiFetch(`/api/budgets/${dbId}/confirm-frontend`, { method: "POST" });
 }
 
 // ── Users ─────────────────────────────────────────────────────────────
@@ -514,6 +518,7 @@ window.API = {
   batchSign:           apiBatchSign,
   acquireLock:         apiAcquireLock,
   releaseLock:         apiReleaseLock,
+  confirmFrontend:     apiConfirmFrontend,
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,

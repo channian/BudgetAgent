@@ -539,7 +539,7 @@ function AssignmentPage({ currentUser }) {
         API.fetchBudgets("completed"),
         API.fetchUsers(),
       ]);
-      const ai   = pending.filter(b => b.status === "AI_REVIEW" && (b.aiResult || b.aiReason));
+      const ai   = pending.filter(b => b.status === "AI_REVIEW" && (b.aiResult || b.aiReason) && b.frontendSubmitted);
       const sent = [
         ...pending.filter(b => b.status !== "AI_REVIEW"),
         ...completed.filter(b => b.dispatchDate),
@@ -1217,19 +1217,44 @@ function ActivityPage() {
 function DataImportPage({ onNew, onRefresh, currentUser }) {
   const [busy,         setBusy]         = React.useState(false);
   const [impMsg,       setImpMsg]       = React.useState("");
-  const [manualCases,  setManualCases]  = React.useState([]);
-  const [manualLoading,setManualLoading]= React.useState(true);
+  // AI建單：RPA created, not yet frontend-confirmed
+  const [aiCases,      setAiCases]      = React.useState([]);
+  // 前端建單：manually created, waiting for AI
+  const [frontendCases,setFrontendCases]= React.useState([]);
+  const [casesLoading, setCasesLoading] = React.useState(true);
+  const [confirmBusy,  setConfirmBusy]  = React.useState({});
   const fileRef = React.useRef();
 
   // Sheet picker modal state: null | { file, sheets: [...], selected: str }
   const [sheetModal, setSheetModal] = React.useState(null);
 
-  React.useEffect(() => {
+  const loadCases = () => {
+    setCasesLoading(true);
     API.fetchBudgets("pending")
-      .then(all => setManualCases(all.filter(b => !b.aiReason && !b.aiResult)))
+      .then(all => {
+        const aiR = all.filter(b => b.status === "AI_REVIEW");
+        setAiCases(aiR.filter(b => (b.aiResult || b.aiReason) && !b.frontendSubmitted));
+        setFrontendCases(aiR.filter(b => !b.aiResult && !b.aiReason && b.frontendSubmitted));
+      })
       .catch(() => {})
-      .finally(() => setManualLoading(false));
-  }, []);
+      .finally(() => setCasesLoading(false));
+  };
+
+  React.useEffect(loadCases, []);
+
+  const doConfirm = async (b) => {
+    setConfirmBusy(s => ({ ...s, [b.dbId]: true }));
+    try {
+      await API.confirmFrontend(b.dbId);
+      Toast.show(`✅ 已確認「${b.project}」，進入派發中心`, "ok");
+      loadCases();
+      onRefresh && onRefresh();
+    } catch (e) {
+      Toast.show(`❌ 確認失敗：${e.message}`, "err");
+    } finally {
+      setConfirmBusy(s => ({ ...s, [b.dbId]: false }));
+    }
+  };
 
   const doExport = async () => {
     setBusy(true);
@@ -1333,29 +1358,85 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
         </div>
       )}
 
-      {/* ── Staging table: manually-created budgets awaiting AI pipeline match ── */}
+      {/* ── Section 1: AI建單 — RPA created but not yet confirmed ── */}
       <div className="card">
-        <div className="card-head">
-          <h3>前端暫存案件 <span className="tag">AI_REVIEW</span></h3>
-          <span className="hint">
-            {manualLoading ? "載入中…" : `${manualCases.length} 件等待 AI 比對`}
-          </span>
+        <div className="card-head" style={{ background: "oklch(0.97 0.015 250)" }}>
+          <h3 style={{ color: "#1d4ed8" }}>
+            AI 建單
+            <span className="block-tag" style={{ marginLeft: 8, background: "#dbeafe", color: "#1d4ed8" }}>
+              AI pipeline 已初審，等待前端確認後進入派發中心
+            </span>
+          </h3>
+          <span className="hint">{casesLoading ? "載入中…" : `${aiCases.length} 件`}</span>
         </div>
-        <div className="card-body tight" style={{ maxHeight: 360, overflowY: "auto" }}>
-          {manualLoading ? (
+        <div className="card-body tight" style={{ maxHeight: 380, overflowY: "auto" }}>
+          {casesLoading ? (
             <div className="empty">載入中…</div>
-          ) : manualCases.length === 0 ? (
-            <div className="empty">🎉 目前沒有等待比對的案件</div>
+          ) : aiCases.length === 0 ? (
+            <div className="empty">目前沒有待確認的 AI 建單</div>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 130px 120px 120px", gap: "0 12px",
-                            padding: "8px 14px", background: "var(--surface-2)", fontSize: 11.5,
-                            fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.04em",
-                            borderBottom: "1px solid var(--border)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 120px 120px 110px 100px",
+                            gap: "0 10px", padding: "8px 14px", background: "var(--surface-2)",
+                            fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)",
+                            letterSpacing: "0.04em", borderBottom: "1px solid var(--border)" }}>
+                <div>週</div><div>項目名稱</div><div>類別</div><div>金額</div><div>AI 結果</div><div>操作</div>
+              </div>
+              {aiCases.map(b => (
+                <div key={b.dbId} style={{ display: "grid", gridTemplateColumns: "60px 1fr 120px 120px 110px 100px",
+                                           gap: "0 10px", padding: "10px 14px", alignItems: "center",
+                                           borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+                  <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
+                  <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                       title={b.project}>{b.project}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{b.subCategory || b.category || "—"}</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 12, textAlign: "right" }}>
+                    NT$ {(Number(b.amount) || 0).toLocaleString()}
+                  </div>
+                  <div><ResultBadge result={b.aiResult} kind="ai"/></div>
+                  <div>
+                    <button className="btn accent sm" disabled={!!confirmBusy[b.dbId]}
+                            onClick={() => doConfirm(b)}
+                            style={{ fontSize: 11, padding: "3px 10px" }}>
+                      {confirmBusy[b.dbId] ? "確認中…" : "✓ 確認"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 12,
+                      color: "var(--text-muted)", borderTop: "1px solid var(--border)", lineHeight: 1.7 }}>
+          💡 AI pipeline 已自動建立並完成初審。點「確認」後案件立即進入派發中心，供管理員指派專家。
+          若預算單名稱與前端建立的案件相同，建立新預算單時會自動完成合併。
+        </div>
+      </div>
+
+      {/* ── Section 2: 前端建單 — manually created, waiting for AI ── */}
+      <div className="card">
+        <div className="card-head" style={{ background: "oklch(0.97 0.01 60)" }}>
+          <h3 style={{ color: "#92400e" }}>
+            前端建單
+            <span className="block-tag" style={{ marginLeft: 8 }}>等待 AI pipeline 初審</span>
+          </h3>
+          <span className="hint">{casesLoading ? "載入中…" : `${frontendCases.length} 件`}</span>
+        </div>
+        <div className="card-body tight" style={{ maxHeight: 300, overflowY: "auto" }}>
+          {casesLoading ? (
+            <div className="empty">載入中…</div>
+          ) : frontendCases.length === 0 ? (
+            <div className="empty">🎉 目前沒有等待 AI 初審的案件</div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 130px 120px 130px",
+                            gap: "0 12px", padding: "8px 14px", background: "var(--surface-2)",
+                            fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)",
+                            letterSpacing: "0.04em", borderBottom: "1px solid var(--border)" }}>
                 <div>週</div><div>項目名稱</div><div>類別</div><div>金額</div><div>狀態</div>
               </div>
-              {manualCases.map(b => (
-                <div key={b.dbId} style={{ display: "grid", gridTemplateColumns: "60px 1fr 130px 120px 120px",
+              {frontendCases.map(b => (
+                <div key={b.dbId} style={{ display: "grid", gridTemplateColumns: "60px 1fr 130px 120px 130px",
                                            gap: "0 12px", padding: "10px 14px", alignItems: "center",
                                            borderBottom: "1px solid var(--border)", fontSize: 13 }}>
                   <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
@@ -1368,7 +1449,7 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
                   <div>
                     <span style={{ fontSize: 11.5, padding: "2px 8px", borderRadius: 4,
                                    background: "#f59e0b22", color: "#f59e0b", fontWeight: 700 }}>
-                      等待AI比對
+                      等待 AI 初審
                     </span>
                   </div>
                 </div>
@@ -1378,7 +1459,7 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
         </div>
         <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 12,
                       color: "var(--text-muted)", borderTop: "1px solid var(--border)", lineHeight: 1.7 }}>
-          💡 這些案件由前端手動建立，尚未有 AI 初審資料。當 AI pipeline 執行時，系統會以模糊匹配（3 層比對）自動將 AI 資料寫入對應案件，完成後將進入正常簽核流程。
+          💡 這些案件由前端手動建立，尚未有 AI 初審資料。AI pipeline 執行後，名稱相同的案件會自動合併並進入派發中心。
         </div>
       </div>
 
