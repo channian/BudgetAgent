@@ -42,3 +42,21 @@ SMTP_SENDER_NAME = os.getenv("SMTP_SENDER_NAME", "預算AI審核平台")
 # Safety checkpoint: every dispatch email is always CC'd to this address.
 SMTP_ALWAYS_CC   = os.getenv("SMTP_ALWAYS_CC",   "Jarven_Chong@aseglobal.com")
 
+# ── 派發通知 Email 複審項目清單（可自行修改）─────────────────────────
+# 每個字串為一個條列項目，依序顯示在 email 的「複審項目」區塊。
+# 修改後重啟 backend 即生效，不需要動 email_service.py。
+EMAIL_REVIEW_CHECKLIST = [
+    "預算需求目的",
+    "作法",
+    "改善效益",
+    "預算合理性",
+    "是否核准預算",
+]
+
+# PS 附註說明（顯示在清單下方，留空字串則不顯示）
+EMAIL_REVIEW_PS = (
+    "預算合理性 專家需要加入說明：\n"
+    "  1. 預算評估的參考數據是否合理建議\n"
+    "  2. 源頭的 UM 評估及系統負載合理性建議（需求進行檢核）"
+)
+

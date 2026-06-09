@@ -24,6 +24,11 @@ def send_dispatch_email(
             from config import SMTP_ALWAYS_CC
         except ImportError:
             SMTP_ALWAYS_CC = ""
+        try:
+            from config import EMAIL_REVIEW_CHECKLIST, EMAIL_REVIEW_PS
+        except ImportError:
+            EMAIL_REVIEW_CHECKLIST = ["預算需求目的", "作法", "改善效益", "預算合理性", "是否核准預算"]
+            EMAIL_REVIEW_PS = ""
     except ImportError as e:
         logger.warning("Email config missing: %s", e)
         return False
@@ -37,6 +42,25 @@ def send_dispatch_email(
     amount_str = f"NT$ {amount:,.0f}" if amount else "—"
     budget_no_str = budget_no or f"#{budget_id}"
     date_str = dispatch_date[:10] if dispatch_date else "—"
+
+    # Build review checklist rows
+    checklist_rows = "".join(
+        f'<tr><td style="padding:6px 0 6px 8px;font-size:13px;color:#555;'
+        f'border-bottom:1px solid #ecdfd6;vertical-align:top;width:24px;">'
+        f'{i+1}.</td>'
+        f'<td style="padding:6px 0 6px 4px;font-size:13px;color:#333;'
+        f'border-bottom:1px solid #ecdfd6;">{item}</td></tr>'
+        for i, item in enumerate(EMAIL_REVIEW_CHECKLIST)
+    )
+    ps_html = ""
+    if EMAIL_REVIEW_PS:
+        ps_lines = EMAIL_REVIEW_PS.replace("\n", "<br/>")
+        ps_html = (
+            f'<div style="margin-top:10px;padding:10px 14px;background:#fff8e1;'
+            f'border-left:3px solid #f59e0b;border-radius:4px;'
+            f'font-size:12px;color:#92660a;line-height:1.7;">'
+            f'<strong>PS：</strong>{ps_lines}</div>'
+        )
 
     html_body = f"""
 <!DOCTYPE html>
@@ -111,6 +135,24 @@ def send_dispatch_email(
                     color:#333;font-family:monospace;">{date_str}</td>
               </tr>
             </table>
+          </td>
+        </tr>
+
+        <!-- Review checklist -->
+        <tr>
+          <td style="padding:0 32px 20px;">
+            <div style="background:#fdf8f4;border-radius:8px;
+                        border:1px solid #ecdfd6;overflow:hidden;">
+              <div style="background:#f3ede7;padding:10px 18px;
+                          font-size:11px;font-weight:700;color:#a06050;
+                          letter-spacing:0.08em;">複審項目</div>
+              <div style="padding:8px 18px 12px;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  {checklist_rows}
+                </table>
+                {ps_html}
+              </div>
+            </div>
           </td>
         </tr>
 
