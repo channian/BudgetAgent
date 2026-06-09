@@ -8,6 +8,61 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _resolve_cc(category, system, expert_name, to_email):
+    """Build the final CC list = fixed CC + matched rule CC, honoring test mode.
+
+    Returns (cc_list, redirect_to). When redirect_to is set (test mode), the
+    caller should send the whole mail only to that address.
+    """
+    try:
+        from config import SMTP_ALWAYS_CC
+    except ImportError:
+        SMTP_ALWAYS_CC = ""
+    try:
+        from config import EMAIL_CC_RULES
+    except ImportError:
+        EMAIL_CC_RULES = []
+    try:
+        from config import EMAIL_TEST_MODE
+    except ImportError:
+        EMAIL_TEST_MODE = False
+    try:
+        from config import EMAIL_TEST_REDIRECT_TO
+    except ImportError:
+        EMAIL_TEST_REDIRECT_TO = ""
+
+    # Test mode: optionally redirect everything to a single inbox, and never CC.
+    if EMAIL_TEST_MODE:
+        redirect = (EMAIL_TEST_REDIRECT_TO or "").strip()
+        return [], redirect
+
+    # Fixed CC (comma-separated supported)
+    cc = [a.strip() for a in (SMTP_ALWAYS_CC or "").replace(";", ",").split(",") if a.strip()]
+
+    # Rule-based CC
+    field_value = {
+        "category": (category or "").strip(),
+        "system":   (system or "").strip(),
+        "expert":   (expert_name or "").strip(),
+    }
+    for rule in (EMAIL_CC_RULES or []):
+        fld = rule.get("field")
+        if field_value.get(fld) and field_value[fld] == (rule.get("equals") or "").strip():
+            for addr in (rule.get("cc") or []):
+                if addr and addr.strip():
+                    cc.append(addr.strip())
+
+    # Dedup (case-insensitive) and drop the primary recipient
+    seen, out = set(), []
+    for addr in cc:
+        low = addr.lower()
+        if low == (to_email or "").lower() or low in seen:
+            continue
+        seen.add(low)
+        out.append(addr)
+    return out, ""
+
+
 def send_dispatch_email(
     to_email: str,
     expert_name: str,
@@ -16,14 +71,12 @@ def send_dispatch_email(
     budget_no: Optional[str],
     amount: Optional[float],
     dispatch_date: Optional[str],
+    category: Optional[str] = None,
+    system: Optional[str] = None,
 ) -> bool:
     """Send a dispatch notification to the assigned expert. Returns True on success."""
     try:
         from config import SMTP_SERVER, SMTP_PORT, SMTP_SENDER, SMTP_SENDER_NAME
-        try:
-            from config import SMTP_ALWAYS_CC
-        except ImportError:
-            SMTP_ALWAYS_CC = ""
         try:
             from config import EMAIL_REVIEW_CHECKLIST, EMAIL_REVIEW_PS
         except ImportError:
@@ -186,26 +239,31 @@ def send_dispatch_email(
 """
 
     try:
+        cc_list, redirect_to = _resolve_cc(category, system, expert_name, to_email)
+
+        # Test mode redirect: send the whole mail only to the test inbox.
+        primary = redirect_to or to_email
+        if redirect_to:
+            cc_list = []
+
         msg = MIMEMultipart("alternative")
         msg["From"] = f"{SMTP_SENDER_NAME} <{SMTP_SENDER}>"
-        msg["To"] = to_email
+        msg["To"] = primary
         msg["Subject"] = subject
 
-        # Safety checkpoint: always CC the supervisor, but never CC the same
-        # address that is already the primary recipient (avoid duplicate).
-        recipients = [to_email]
-        cc = (SMTP_ALWAYS_CC or "").strip()
-        if cc and cc.lower() != to_email.lower():
-            msg["Cc"] = cc
-            recipients.append(cc)
+        recipients = [primary]
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
+            recipients.extend(cc_list)
 
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
             server.sendmail(SMTP_SENDER, recipients, msg.as_string())
 
-        logger.info("Dispatch email sent to %s (cc=%s) for budget #%s",
-                    to_email, cc or "—", budget_id)
+        logger.info("Dispatch email sent to %s (cc=%s%s) for budget #%s",
+                    primary, ", ".join(cc_list) or "—",
+                    " [TEST REDIRECT]" if redirect_to else "", budget_id)
         return True
 
     except Exception as e:
