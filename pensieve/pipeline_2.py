@@ -234,7 +234,11 @@ def _find_project(cur, incoming_name: str):
 # ════════════════════════════════════════════════════════════════════════
 def _write_db(merged: list):
     print("\n🚀 開始寫入資料庫…")
-    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+    except Exception as e:
+        print(f"❌ 無法連線資料庫：{e}")
+        return
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     _, iso_week, _ = datetime.datetime.now().isocalendar()
     ok, fail = 0, 0
@@ -309,8 +313,10 @@ def _write_db(merged: list):
             ok += 1
 
         except Exception as e:
+            import traceback
             conn.rollback()
             print(f"❌  {project} 失敗：{e}")
+            traceback.print_exc()
             fail += 1
 
     cur.close()
