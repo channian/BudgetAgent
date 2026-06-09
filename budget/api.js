@@ -117,8 +117,9 @@ function mapAiJsonPaste(j) {
 // ── DB row → frontend object ──────────────────────────────────────────
 function dbToFrontend(row) {
   const ai           = parseAiResult(row.ai_result);
-  const expertResult = row.expert_decision === "通過" ? "approve"
-                     : row.expert_decision === "退件" ? "reject" : null;
+  const _ed = row.expert_decision || "";
+  const expertResult = ["通過", "核可", "approve", "Approve", "APPROVE"].includes(_ed) ? "approve"
+                     : ["退件", "reject", "Reject", "REJECT"].includes(_ed) ? "reject" : null;
   const ownerName    = row.owner || "";   // plain text column
 
   return {

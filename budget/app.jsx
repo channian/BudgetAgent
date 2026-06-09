@@ -149,6 +149,7 @@ function App() {
   const goList     = ()  => {
     if (fromRoute === "expert_review") setRoute("expert_review");
     else if (fromRoute === "data_import") setRoute("data_import");
+    else if (fromRoute === "approved") setRoute("approved");
     else setRoute("pending");
   };
 
@@ -241,7 +242,7 @@ function App() {
     crumbs = ["使用狀況"];
   } else if (route === "detail" && currentBudget) {
     body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onDelete={deleteBudget} onEdit={goEdit} currentUser={user} fromRoute={fromRoute} />;
-    crumbs = [fromRoute === "expert_review" ? "待專家審核" : "待簽核", currentBudget.id];
+    crumbs = [fromRoute === "expert_review" ? "待專家審核" : fromRoute === "approved" ? "已簽核完成" : "待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
     body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id, "編輯"];

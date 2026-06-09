@@ -507,6 +507,26 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const [impMsg,    setImpMsg]    = React.useState(null); // null | { ok, text, errors[] }
   const [sheetModal,setSheetModal]= React.useState(null); // null | { file, sheets, selected }
 
+  // Row-2 drag-resize between bar chart and detail table
+  const [splitW, setSplitW] = React.useState(460);
+  const splitDrag = React.useRef(null);
+  const onSplitMouseDown = (e) => {
+    e.preventDefault();
+    splitDrag.current = { x: e.clientX, w: splitW };
+    document.body.classList.add("is-resizing");
+    const onMove = (ev) => {
+      const dx = ev.clientX - splitDrag.current.x;
+      setSplitW(Math.max(260, Math.min(splitDrag.current.w + dx, 820)));
+    };
+    const onUp = () => {
+      document.body.classList.remove("is-resizing");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   const doExportCompleted = async () => {
     setBusy(true);
     try { await API.exportBudgets("completed", "csv"); }
@@ -919,11 +939,11 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
             </div>
           </div>
 
-          {/* ── Row 2: 完成件數排行 + 已簽核明細（同一行，高度約 10 列，其餘內部 scroll） ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(420px, 480px) 1fr", gap: 16, height: 520 }}>
+          {/* ── Row 2: 完成件數排行 + 已簽核明細（可拖曳分隔線調整寬度） ── */}
+          <div style={{ display: "flex", gap: 0, height: 520 }}>
 
             {/* 排行 */}
-            <div className="card" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div className="card" style={{ width: splitW, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="card-head">
                 <h3>完成件數排行</h3>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -948,8 +968,16 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
               </div>
             </div>
 
+            {/* Drag handle */}
+            <div onMouseDown={onSplitMouseDown}
+                 style={{ width: 10, flexShrink: 0, cursor: "col-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}>
+              <div style={{ width: 3, height: 48, background: "var(--border)", borderRadius: 2, transition: "background 0.15s" }}
+                   onMouseEnter={e => e.currentTarget.style.background = "var(--accent)"}
+                   onMouseLeave={e => e.currentTarget.style.background = "var(--border)"}/>
+            </div>
+
             {/* 已簽核明細 */}
-            <div className="card" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+            <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
               <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8, columnGap: 6 }}>
                 <h3 style={{ whiteSpace: "nowrap" }}>
                   已簽核明細
