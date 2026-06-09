@@ -194,12 +194,19 @@ function App() {
     } catch (e) { setApiError(e.message); }
   };
 
-  const saveNew = async (form) => {
+  const saveNew = async (form, pendingFiles = []) => {
     try {
+      let budgetId = currentBudget?.dbId;
       if (currentBudget) {
         await API.updateBudget(currentBudget.dbId, form);
       } else {
-        await API.createBudget(form);
+        const result = await API.createBudget(form);
+        budgetId = result?.id;
+      }
+      if (budgetId && pendingFiles.length > 0) {
+        for (const f of pendingFiles) {
+          await API.uploadAttachment(budgetId, f).catch(e => console.error("附件上傳失敗：", e));
+        }
       }
       setRoute(fromRoute === "data_import" ? "data_import" : "pending");
     } catch (e) { setApiError(e.message); }

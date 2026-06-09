@@ -1,5 +1,12 @@
 /* Budget submission / edit page */
 
+function fmtFileSize(bytes) {
+  if (!bytes) return "—";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+}
+
 function EditPage({ budget, onBack, onSave, currentUser }) {
   const isNew = !budget;
 
@@ -20,6 +27,45 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
   }));
   const [jsonText, setJsonText] = React.useState("");
   const [jsonErr, setJsonErr]   = React.useState("");
+
+  // Attachments
+  const [pendingFiles,  setPendingFiles]  = React.useState([]); // queued for upload after save (new budget)
+  const [attachments,   setAttachments]   = React.useState([]); // existing attachments (edit mode)
+  const [attUploading,  setAttUploading]  = React.useState(false);
+  const fileInputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!isNew && budget?.dbId) {
+      API.fetchAttachments(budget.dbId)
+        .then(list => setAttachments(list))
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    if (isNew) {
+      setPendingFiles(prev => [...prev, file]);
+    } else {
+      setAttUploading(true);
+      API.uploadAttachment(budget.dbId, file)
+        .then(att => setAttachments(prev => [...prev, att]))
+        .catch(err => alert("上傳失敗：" + err.message))
+        .finally(() => setAttUploading(false));
+    }
+  };
+
+  const removePending = (idx) => setPendingFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const handleDeleteAtt = async (att) => {
+    if (!confirm(`確定刪除附件「${att.original_name}」？`)) return;
+    try {
+      await API.deleteAttachment(att.id);
+      setAttachments(prev => prev.filter(a => a.id !== att.id));
+    } catch (err) { alert("刪除失敗：" + err.message); }
+  };
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -69,7 +115,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
         </div>
         <div className="actions">
           <button className="btn ghost" onClick={onBack}>取消</button>
-          <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form })}>
+          <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form }, pendingFiles)}>
             {isNew ? "送出申請" : "儲存變更"}
           </button>
         </div>
@@ -236,6 +282,57 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                   <input type="text" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="附註訊息…"/>
                 </div>
               </div>
+            </div>
+          </div>
+          {/* Attachments */}
+          <div className="card">
+            <div className="card-head">
+              <h3>附件 <span className="tag">ATTACHMENTS</span></h3>
+              <button
+                className="btn sm"
+                disabled={attUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {attUploading ? "上傳中…" : "+ 上傳附件"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
+            </div>
+            <div className="card-body">
+              {isNew ? (
+                pendingFiles.length === 0 ? (
+                  <div className="hint">尚無附件，點擊「上傳附件」新增（儲存後自動上傳）</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {pendingFiles.map((f, i) => (
+                      <div key={i} className="flex-row" style={{ background: "var(--surface-2)", padding: "8px 12px", borderRadius: "var(--radius-sm)", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.name}>{f.name}</span>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtFileSize(f.size)}</span>
+                        <button className="btn ghost sm" style={{ padding: "2px 8px", fontSize: 11, color: "var(--bad)" }} onClick={() => removePending(i)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                attachments.length === 0 ? (
+                  <div className="hint">無附件</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {attachments.map(att => (
+                      <div key={att.id} className="flex-row" style={{ background: "var(--surface-2)", padding: "8px 12px", borderRadius: "var(--radius-sm)", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={att.original_name}>{att.original_name}</span>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtFileSize(att.file_size)}</span>
+                        <button className="btn ghost sm" style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => API.downloadAttachment(att.id, att.original_name)}>下載</button>
+                        <button className="btn ghost sm" style={{ padding: "2px 8px", fontSize: 11, color: "var(--bad)" }} onClick={() => handleDeleteAtt(att)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
             </div>
           </div>
         </div>

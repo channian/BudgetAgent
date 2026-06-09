@@ -539,7 +539,7 @@ function AssignmentPage({ currentUser }) {
         API.fetchBudgets("completed"),
         API.fetchUsers(),
       ]);
-      const ai   = pending.filter(b => b.status === "AI_REVIEW" && (b.aiResult || b.aiReason) && b.frontendSubmitted);
+      const ai   = pending.filter(b => b.status === "AI_REVIEW" && (b.aiResult === "approve" || b.aiResult === "reject") && b.frontendSubmitted);
       const sent = [
         ...pending.filter(b => b.status !== "AI_REVIEW"),
         ...completed.filter(b => b.dispatchDate),
@@ -1233,8 +1233,9 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
     API.fetchBudgets("pending")
       .then(all => {
         const aiR = all.filter(b => b.status === "AI_REVIEW");
-        setAiCases(aiR.filter(b => (b.aiResult || b.aiReason) && !b.frontendSubmitted));
-        setFrontendCases(aiR.filter(b => !b.aiResult && !b.aiReason && b.frontendSubmitted));
+        // "has real AI decision" = approve or reject (never "hold", which is parseAiResult's fallback for null)
+        setAiCases(aiR.filter(b => (b.aiResult === "approve" || b.aiResult === "reject") && !b.frontendSubmitted));
+        setFrontendCases(aiR.filter(b => b.aiResult !== "approve" && b.aiResult !== "reject" && b.frontendSubmitted));
       })
       .catch(() => {})
       .finally(() => setCasesLoading(false));
