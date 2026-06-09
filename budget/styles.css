@@ -977,6 +977,7 @@ table.dt .owner-cell .dp { font-size: 11px; color: var(--text-muted); }
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-card);
+  flex-shrink: 0;
 }
 .card-head {
   padding: 14px 18px;
