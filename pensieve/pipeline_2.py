@@ -199,7 +199,7 @@ def _find_project(cur, incoming_name: str):
         cur.execute(
             "SELECT * FROM budget.budget_requests "
             "WHERE project_name = %s OR project_name LIKE %s "
-            "ORDER BY db_id DESC",
+            "ORDER BY id DESC",
             (name, esc + "（補送%"),
         )
         return [dict(r) for r in cur.fetchall()]
@@ -274,20 +274,20 @@ def _write_db(merged: list):
                     """UPDATE budget.budget_requests SET
                            category=%s, sub_category=%s, expert_name=%s,
                            ai_comment=%s, ai_result=%s, updated_at=NOW()
-                       WHERE db_id=%s RETURNING db_id""",
+                       WHERE id=%s RETURNING id""",
                     (category, sub_category, expert_name,
-                     ai_comment, ai_result_pg, latest["db_id"]),
+                     ai_comment, ai_result_pg, latest["id"]),
                 )
                 conn.commit()
-                budget_id = cur.fetchone()["db_id"]
-                print(f"🔄  updated db_id={budget_id}  {canonical or project}")
+                budget_id = cur.fetchone()["id"]
+                print(f"🔄  updated id={budget_id}  {canonical or project}")
                 ok += 1
                 continue
 
             if latest and latest["status"] in DECIDED_STATUSES:
                 base_name   = canonical or project
                 insert_name = _next_supplement_name(cur, base_name)
-                note = f"補送：原案件「{base_name}」(#{latest['db_id']}) 經審理後重新送件。"
+                note = f"補送：原案件「{base_name}」(#{latest['id']}) 經審理後重新送件。"
                 action = "補送"
             else:
                 insert_name = project
@@ -299,13 +299,13 @@ def _write_db(merged: list):
                        (project_name, week, category, sub_category, expert_name,
                         ai_comment, ai_result, status, note)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'AI_REVIEW', %s)
-                   RETURNING db_id""",
+                   RETURNING id""",
                 (insert_name, iso_week, category, sub_category, expert_name,
                  ai_comment, ai_result_pg, note),
             )
             conn.commit()
-            budget_id = cur.fetchone()["db_id"]
-            print(f"✅  {action} db_id={budget_id}  {insert_name}")
+            budget_id = cur.fetchone()["id"]
+            print(f"✅  {action} id={budget_id}  {insert_name}")
             ok += 1
 
         except Exception as e:
