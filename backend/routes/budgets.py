@@ -1098,11 +1098,11 @@ def _parse_cycle(v):
 # already used by pipeline_1 / CAT_NAME_TO_ID so chip colours stay consistent.
 CATEGORY_SYSTEM_EXPERTS = {
     "設備擴充 (UTI)": {
-        "空調": ["Jackie"],
-        "空壓": ["Yubin"],
-        "水務": ["Yichi"],
+        "空調": ["Jackie", "JackieCT", "Yuchi"],
+        "空壓": ["Yubin", "UJ"],
+        "水務": ["Yichi", "Soil"],
         "抽氣": ["Yichi"],
-        "電力": ["Meko"],
+        "電力": ["Meko", "Andy"],
     },
     "工程擴廠 (新工)": {
         "二次配":   ["CC", "Asheng", "Matt"],
@@ -1114,8 +1114,8 @@ CATEGORY_SYSTEM_EXPERTS = {
         "電力": ["Asheng"],
     },
     "CIM相關": {
-        "監控":     ["Hank"],
-        "AI自動化": ["Huching"],
+        "監控":     ["Hank", "Michael"],
+        "AI自動化": ["Huching", "Michael"],
     },
     "法遵 (ESH)": {
         "消防": ["Minghua", "CT"],
