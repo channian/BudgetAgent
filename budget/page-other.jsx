@@ -1197,12 +1197,16 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
   const _runImport = async (file, sheet) => {
     try {
       const result = await API.importBudgets(file, { sheet, mode: "completed" });
-      const cnt = result.inserted ?? result.created ?? 0;
-      setImpMsg(`匯入完成：新增/更新 ${cnt} 筆，略過 ${result.skipped ?? 0} 筆` +
-        (result.errors?.length ? `，${result.errors.length} 列錯誤` : ""));
+      const cnt   = result.inserted  ?? result.created ?? 0;
+      const skip  = result.skipped   ?? 0;
+      const total = result.total_rows ?? (cnt + skip + (result.errors?.length ?? 0));
+      const errs  = result.errors    ?? [];
+      let msg = `匯入完成：Excel 共 ${total} 列 → 新增/更新 ${cnt} 筆，略過空列 ${skip} 筆`;
+      if (errs.length) msg += `，錯誤 ${errs.length} 列`;
+      setImpMsg({ ok: errs.length === 0, text: msg, errors: errs });
       onRefresh();
     } catch (err) {
-      setImpMsg("⚠ 匯入失敗：" + err.message);
+      setImpMsg({ ok: false, text: "⚠ 匯入失敗：" + err.message, errors: [] });
     } finally {
       setBusy(false);
     }
@@ -1230,11 +1234,23 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
       </div>
 
       {impMsg && (
-        <div style={{ padding: "8px 14px", background: impMsg.startsWith("⚠") ? "var(--bad-soft)" : "var(--ok-soft)",
-                      color: impMsg.startsWith("⚠") ? "var(--bad)" : "var(--ok)",
-                      borderRadius: "var(--radius)", fontSize: 13, marginBottom: 4 }}>
-          {impMsg}
-          <button onClick={() => setImpMsg("")} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit" }}>✕</button>
+        <div style={{
+          background: impMsg.ok ? "var(--ok-soft)" : "var(--bad-soft)",
+          color:      impMsg.ok ? "var(--ok)"      : "var(--bad)",
+          borderRadius: "var(--radius)", fontSize: 13, marginBottom: 4,
+        }}>
+          <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ flex: 1 }}>{impMsg.text}</span>
+            <button onClick={() => setImpMsg(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 600 }}>✕</button>
+          </div>
+          {impMsg.errors && impMsg.errors.length > 0 && (
+            <div style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.75, marginBottom: 4 }}>錯誤明細（前 {impMsg.errors.length} 列）：</div>
+              {impMsg.errors.map((e, i) => (
+                <div key={i} className="mono" style={{ fontSize: 11, opacity: 0.85 }}>{e}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -940,13 +940,14 @@ IMPORT_ALIASES = {
 COMPLETED_IMPORT_ALIASES = {
     "project_name":    ["Project Name", "項目名稱", "案件名稱", "project_name"],
     "week":            ["週數(w)", "週數", "week", "Week"],
-    "category":        ["類別", "category", "判定類別"],
-    "sub_category":    ["系統", "判定系統", "sub_category", "Sub Category"],
+    # NOTE: Excel "類別" = 系統 (sub_category), NOT 大類別 (category)
+    "category":        ["category", "判定類別"],
+    "sub_category":    ["類別", "系統", "判定系統", "sub_category", "Sub Category"],
     # Excel 的「Owner」欄存的是負責專家，對應 expert_name（非 owner）
     "expert_name":     ["負責專家", "Owner", "Expert", "expert_name"],
     "budget_no":       ["BudgetNo.", "BudgetNo", "Budget No.", "預算單號", "budget_no"],
     "owner":           ["預算負責人", "owner", "負責人"],
-    "amount":          ["金額", "amount", "金額 (NT$)"],
+    "amount":          ["金額 NT", "金額(NT$)", "金額(NT)", "金額", "amount", "金額 (NT$)"],
     "expert_comment":  ["專家評論", "expert_comment"],
     "expert_decision": ["審核處置", "expert_decision"],
     "dispatch_date":   ["派送日期", "dispatch_date"],
@@ -1171,10 +1172,16 @@ def _import_completed(header, raw_rows, user):
     """Import historical completed records directly into CLOSED / REJECTED status."""
     idx = _resolve_header(header, COMPLETED_IMPORT_ALIASES)
     if "project_name" not in idx:
-        return jsonify(error="找不到「Project Name / 項目名稱」欄位，請確認標題列"), 400
+        # Help diagnose: show what columns we did recognise
+        recognised = ", ".join(f"{k}←「{header[v]}」" for k, v in idx.items()) or "（無）"
+        return jsonify(
+            error=f"找不到「Project Name / 項目名稱」欄位，請確認標題列。"
+                  f"已識別欄位：{recognised}"
+        ), 400
 
     _, iso_week, _ = datetime.datetime.now().isocalendar()
     inserted, skipped, errors = 0, 0, []
+    total_data_rows = sum(1 for r in raw_rows if any(v is not None and str(v).strip() for v in r))
 
     def cell(row, field):
         i = idx.get(field)
@@ -1248,7 +1255,12 @@ def _import_completed(header, raw_rows, user):
         return jsonify(error=str(e)), 500
 
     _audit_and_notify(user, inserted, skipped)
-    return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
+    return jsonify(
+        inserted=inserted,
+        skipped=skipped,
+        total_rows=total_data_rows,
+        errors=errors[:50],   # return up to 50 error lines for diagnostics
+    )
 
 
 def _audit_and_notify(user, inserted, skipped):
