@@ -260,8 +260,10 @@ async function apiDispatchBudget(dbId, form) {
   const d = await apiFetch(`/api/budgets/${dbId}/dispatch`, {
     method: "POST",
     body: JSON.stringify({
-      budget_no:   form.budget_no   || null,
-      expert_name: form.expert_name || null,
+      budget_no:    form.budget_no    || null,
+      expert_name:  form.expert_name  || null,
+      category:     form.category     || null,
+      sub_category: form.sub_category || null,
     }),
   });
   return { budget: dbToFrontend(d.budget), emailStatus: d.email_status };

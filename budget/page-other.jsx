@@ -16,6 +16,18 @@ const LIB_CAT_COLORS = {
   "法遵 (ESH)":      { bg: "#fef3c7", text: "#b45309", dot: "#fbbf24" },
 };
 
+// 派發中心：類別 / 系統下拉選單選項（對應 pensieve/pipeline_1.py 分類白名單）
+const DISPATCH_CATEGORIES = ["設備擴充 (UTI)", "工程擴廠 (新工)", "CIM相關", "法遵 (ESH)", "未知"];
+const DISPATCH_SYSTEMS = [
+  "水務", "空壓", "空調", "電力", "安全", "消防", "資安",
+  "AI自動化", "抽氣", "環保", "Relayout", "二次配", "建管", "未知",
+];
+
+// 確保下拉選單一定包含目前值（即便不在預設清單中），避免 AI 判定值顯示為空白
+function withCurrentOption(options, current) {
+  return current && !options.includes(current) ? [current, ...options] : options;
+}
+
 function LibraryPage({ currentUser }) {
   const role    = currentUser?.role || "viewer";
   const isAdmin = role === "admin";
@@ -549,7 +561,12 @@ function AssignmentPage({ currentUser }) {
       setDispatched(sent);
       setExperts(users.filter(u => u.role === "expert"));
       const init = {};
-      ai.forEach(b => { init[b.dbId] = { budget_no: b.budgetNo || "", expert_name: b.expertName || "" }; });
+      ai.forEach(b => { init[b.dbId] = {
+        budget_no:    b.budgetNo    || "",
+        expert_name:  b.expertName  || "",
+        category:     b.category    || "",
+        sub_category: b.subCategory || "",
+      }; });
       setForms(init);
       setDoneInfo({}); setErrMsg({});
     } catch (e) {
@@ -674,6 +691,7 @@ function AssignmentPage({ currentUser }) {
                 <div>週</div>
                 <div>項目名稱</div>
                 <div>類別</div>
+                <div>系統</div>
                 <div>金額</div>
                 <div>負責專家</div>
                 <div></div>
@@ -688,7 +706,32 @@ function AssignmentPage({ currentUser }) {
                   <div key={b.dbId} className={`dispatch-row ${isDone ? "dispatched" : ""}`}>
                     <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
                     <div className="nm" title={b.project}>{b.project}</div>
-                    <div><CategoryChip id={b.categoryId} name={b.category}/></div>
+                    <div>
+                      <select
+                        className="cell-input"
+                        value={f.category || ""}
+                        onChange={e => setField(b.dbId, "category", e.target.value)}
+                        disabled={isDone || isBusy}
+                      >
+                        <option value="">— 選擇類別 —</option>
+                        {withCurrentOption(DISPATCH_CATEGORIES, f.category).map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <select
+                        className="cell-input"
+                        value={f.sub_category || ""}
+                        onChange={e => setField(b.dbId, "sub_category", e.target.value)}
+                        disabled={isDone || isBusy}
+                      >
+                        <option value="">— 選擇系統 —</option>
+                        {withCurrentOption(DISPATCH_SYSTEMS, f.sub_category).map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
                     <div className="mono" style={{ textAlign: "right", fontSize: 12.5 }}>
                       NT$ {fmtAmount(b.amount)}
                     </div>
@@ -701,8 +744,8 @@ function AssignmentPage({ currentUser }) {
                           disabled={isDone || isBusy}
                         >
                           <option value="">— 選擇專家 —</option>
-                          {experts.map(ex => (
-                            <option key={ex.id} value={ex.name}>{ex.name}</option>
+                          {withCurrentOption(experts.map(ex => ex.name), f.expert_name).map(name => (
+                            <option key={name} value={name}>{name}</option>
                           ))}
                         </select>
                       ) : (

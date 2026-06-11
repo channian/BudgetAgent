@@ -346,9 +346,11 @@ def dispatch_budget(budget_id):
     if user.get("role") != "admin":
         return jsonify(error="僅系統管理員可執行派發"), 403
 
-    data        = request.json or {}
-    budget_no   = (data.get("budget_no")   or "").strip() or None
-    expert_name = (data.get("expert_name") or "").strip() or None
+    data         = request.json or {}
+    budget_no    = (data.get("budget_no")    or "").strip() or None
+    expert_name  = (data.get("expert_name")  or "").strip() or None
+    category     = (data.get("category")     or "").strip() or None
+    sub_category = (data.get("sub_category") or "").strip() or None
 
     try:
         with db_cursor() as cur:
@@ -365,12 +367,14 @@ def dispatch_budget(budget_id):
                 """UPDATE budget.budget_requests
                    SET budget_no    = COALESCE(%s, budget_no),
                        expert_name  = COALESCE(%s, expert_name),
+                       category     = COALESCE(%s, category),
+                       sub_category = COALESCE(%s, sub_category),
                        dispatch_date = NOW(),
                        status        = 'EXPERT_REVIEW',
                        updated_at    = NOW()
                    WHERE id = %s
                    RETURNING *""",
-                (budget_no, expert_name, budget_id),
+                (budget_no, expert_name, category, sub_category, budget_id),
             )
             after = row_to_dict(cur.fetchone())
     except Exception as e:
