@@ -61,7 +61,14 @@ def _resolve_cc(category, system, expert_name, to_email):
     }
     for rule in (EMAIL_CC_RULES or []):
         fld = rule.get("field")
-        if field_value.get(fld) and field_value[fld] == (rule.get("equals") or "").strip():
+        val = field_value.get(fld, "")
+        matched = False
+        if "equals" in rule:
+            matched = val == (rule.get("equals") or "").strip()
+        elif "contains" in rule:
+            needle = (rule.get("contains") or "").strip()
+            matched = bool(needle) and needle.lower() in val.lower()
+        if matched:
             for addr in (rule.get("cc") or []):
                 if addr and addr.strip():
                     cc.append(addr.strip())

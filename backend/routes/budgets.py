@@ -505,6 +505,8 @@ def reassign_budget(budget_id):
                 project_name=before["project_name"], budget_id=budget_id,
                 budget_no=after.get("budget_no"), amount=after.get("amount"),
                 dispatch_date=after.get("dispatch_date"),
+                category=after.get("category"),
+                system=after.get("sub_category"),
             )
             email_status = "sent" if ok else "failed"
         else:
