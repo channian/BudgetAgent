@@ -83,11 +83,17 @@ def _read_clipboard() -> str:
     return ""
 
 
-def _parse_clipboard(text: str) -> list:
-    """從文字解析案件陣列；支援頂層陣列或 {"案件審核結果":[...]} 包裝物件格式。"""
+def _parse_clipboard(text: str):
+    """從文字解析案件陣列。
+
+    回傳 None  → 完全無法解析出陣列（格式錯誤）
+    回傳 list  → 成功解析（可能是空陣列，代表線上 AI 回傳 0 筆案件）
+
+    支援頂層陣列或 {"案件審核結果":[...]} 包裝物件格式。
+    """
     text = text.strip()
     if not text:
-        return []
+        return None
     # 直接解析：頂層陣列 或 包裝物件
     try:
         data = json.loads(text)
@@ -113,7 +119,7 @@ def _parse_clipboard(text: str) -> list:
                 return data
         except json.JSONDecodeError:
             pass
-    return []
+    return None
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -334,9 +340,15 @@ def process():
         pass
 
     ai_results = _parse_clipboard(raw)
-    if not ai_results:
+    if ai_results is None:
         _log("❌ 剪貼簿內容無法解析為 JSON 陣列，請確認格式正確")
         _log(f"   （前 200 字）{raw[:200]}")
+        return
+
+    if not ai_results:
+        _log("ℹ️  線上 AI 回傳的「案件審核結果」是空陣列（0 筆案件），本次沒有資料寫入 DB。")
+        _log("   請確認貼給線上 AI 的內容（pipeline_1 複製的分類+全文）是否完整、"
+             "AI 是否正確輸出了案件清單，而不是判定『沒有案件需要審核』。")
         return
 
     _log(f"✅ 解析到 {len(ai_results)} 筆線上 AI 審核結果")
