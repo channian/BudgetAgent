@@ -77,6 +77,41 @@ EXPERT_DB = {
     "法遵 (ESH)": {"消防": ["吳明華"], "建管": ["吳明華"], "環保": ["姜婷毓"], "安全": ["楊小惠"]},
 }
 
+# ── 同系統多位專家時的輪流分派 ────────────────────────────────────────────
+# 進度記錄於 WORK_DIR/expert_rotation_state.json，跨次執行保留：
+# 同一(類別,系統)這次選了某人，下次該系統再有案件時就輪到下一位，
+# 全部輪完後從頭開始。
+EXPERT_ROTATION_FILE = os.path.join(WORK_DIR, "expert_rotation_state.json")
+
+
+def _load_rotation_state() -> dict:
+    try:
+        with open(EXPERT_ROTATION_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_rotation_state(state: dict):
+    try:
+        os.makedirs(WORK_DIR, exist_ok=True)
+        with open(EXPERT_ROTATION_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _pick_expert(category: str, system: str, experts: list, rotation_state: dict) -> str:
+    """從候選專家中輪流選出一位；只有一位則直接回傳；無人則回傳「待分配」。"""
+    if not experts:
+        return "待分配"
+    if len(experts) == 1:
+        return experts[0]
+    key = f"{category}|{system}"
+    idx = rotation_state.get(key, 0) % len(experts)
+    rotation_state[key] = (idx + 1) % len(experts)
+    return experts[idx]
+
 BOILERPLATE_NOISE = [
     "Need To Know", "會議機密", "四「不」原則", "不將會議記錄轉寄",
     "公務機密管理規範", "人事規章處理", "雇用合約", "Notes E-Mail",
@@ -347,6 +382,7 @@ def process():
     folders = [d for d in os.listdir(INPUT_PATH)
                if os.path.isdir(os.path.join(INPUT_PATH, d)) and not d.startswith(".")]
 
+    rotation_state = _load_rotation_state()
     all_cases = []
     for folder in folders:
         print(f"  分析中：{folder}")
@@ -373,7 +409,7 @@ def process():
             "案件名稱":            folder,
             "判定系統":            system,
             "判定類別":            category,
-            "負責專家":            ", ".join(experts) if experts else "待分配",
+            "負責專家":            _pick_expert(category, system, experts, rotation_state),
             "檔案實體清單":         "\n".join(inventory),
             "所有檔案原文(按檔案分段)": full_text,
         })
@@ -401,7 +437,7 @@ def process():
             ).upper()
             case["判定類別"] = classify_category(sys_result, folder_header)
             experts = EXPERT_DB.get(case["判定類別"], {}).get(sys_result, [])
-            case["負責專家"] = ", ".join(experts) if experts else "待分配"
+            case["負責專家"] = _pick_expert(case["判定類別"], sys_result, experts, rotation_state)
             print(f"    → ✅ {sys_result} / {case['判定類別']}")
 
     # 此時 all_cases 已 100% 分配完成，無未知系統
@@ -409,6 +445,7 @@ def process():
     _save(os.path.join(WORK_DIR, "pytollm_output.json"), all_cases)
     _save(os.path.join(WORK_DIR, "system_defined.json"), all_cases)
     _save(os.path.join(WORK_DIR, "system_unknown.json"), [])   # 恆為空，保留檔案相容性
+    _save_rotation_state(rotation_state)  # 記錄本次輪流進度，供下次執行接續
 
     print(f"\n✅ 完成：共 {len(all_cases)} 筆全部判定完成"
           f"（規則 {rule_count} 筆 / LLM {len(rule_unknown)} 筆），無未知系統")
