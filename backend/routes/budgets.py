@@ -1,9 +1,10 @@
-import io, csv, json, hashlib, datetime
+import io, os, csv, json, hashlib, datetime
 from flask import Blueprint, request, jsonify, send_file
 from psycopg2.extras import Json as PgJson
 from db import cursor as db_cursor, row_to_dict
 from utils.audit import log as audit_log
 from routes.auth import require_auth, current_user
+from routes.attachments import UPLOAD_DIR
 
 budgets_bp = Blueprint("budgets", __name__)
 
@@ -639,6 +640,96 @@ def confirm_frontend(budget_id):
         return jsonify(error=str(e)), 500
     audit_log(budget_id, "CONFIRM_FRONTEND", user.get("name", "system"), None, after)
     return jsonify(ok=True, id=after["id"], status=after["status"])
+
+
+# ── Manual merge: AI 建單 ↔ 前端建單 ──────────────────────────────────
+@budgets_bp.post("/budgets/<int:ai_id>/merge-into/<int:frontend_id>")
+@require_auth
+def merge_ai_case(ai_id, frontend_id):
+    """Manually pair an AI 建單 case with a 前端建單 case whose project_name
+    didn't match automatically during ingest.
+
+    AI fields (category / sub_category / expert_name / ai_comment /
+    ai_result) are copied onto the 前端建單 record; its own project_name,
+    owner, amount, budget_no etc. are kept as-is. The AI 建單 record (and
+    its audit history / attachments) is folded into the surviving record
+    and removed.
+    """
+    user = current_user()
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行合併"), 403
+
+    if ai_id == frontend_id:
+        return jsonify(error="不能合併同一筆案件"), 400
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (ai_id,))
+            ai_row = cur.fetchone()
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (frontend_id,))
+            fe_row = cur.fetchone()
+        if not ai_row or not fe_row:
+            return jsonify(error="案件不存在"), 404
+        ai_case = row_to_dict(ai_row)
+        fe_case = row_to_dict(fe_row)
+
+        if ai_case.get("frontend_submitted"):
+            return jsonify(error="來源案件已是前端確認案件，無法作為 AI 建單合併來源"), 400
+        if not fe_case.get("frontend_submitted"):
+            return jsonify(error="目標案件不是前端建單"), 400
+
+        ai_result = ai_case.get("ai_result")
+        if isinstance(ai_result, (dict, list)):
+            ai_result = PgJson(ai_result)
+
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests SET
+                       category    = COALESCE(%s, category),
+                       sub_category= COALESCE(%s, sub_category),
+                       expert_name = COALESCE(%s, expert_name),
+                       ai_comment  = %s,
+                       ai_result   = %s,
+                       updated_at  = NOW()
+                   WHERE id = %s RETURNING *""",
+                (ai_case.get("category"), ai_case.get("sub_category"),
+                 ai_case.get("expert_name"), ai_case.get("ai_comment"),
+                 ai_result, frontend_id),
+            )
+            after = row_to_dict(cur.fetchone())
+
+            # Re-point audit history + attachments from the AI 建單 record
+            # onto the surviving 前端建單 record before deleting it.
+            cur.execute("UPDATE budget.audit_logs SET request_id=%s WHERE request_id=%s",
+                         (frontend_id, ai_id))
+            cur.execute("SELECT * FROM budget.attachments WHERE budget_id=%s", (ai_id,))
+            ai_attachments = [row_to_dict(r) for r in cur.fetchall()]
+            cur.execute("UPDATE budget.attachments SET budget_id=%s WHERE budget_id=%s",
+                         (frontend_id, ai_id))
+            cur.execute("DELETE FROM budget.budget_requests WHERE id=%s", (ai_id,))
+
+        # Move uploaded files on disk so they match the re-pointed attachment rows.
+        if ai_attachments:
+            src_dir = os.path.join(UPLOAD_DIR, str(ai_id))
+            dst_dir = os.path.join(UPLOAD_DIR, str(frontend_id))
+            os.makedirs(dst_dir, exist_ok=True)
+            for att in ai_attachments:
+                src = os.path.join(src_dir, att["filename"])
+                dst = os.path.join(dst_dir, att["filename"])
+                if os.path.exists(src):
+                    os.replace(src, dst)
+            try:
+                os.rmdir(src_dir)
+            except OSError:
+                pass
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    audit_log(frontend_id, "MERGE_AI_CASE", user.get("name", "system"),
+              {"merged_from": ai_case}, after)
+    return jsonify(id=frontend_id, status=after["status"], action="merged",
+                   project_name=after["project_name"],
+                   message=f"已將 AI 建單「{ai_case['project_name']}」合併至「{after['project_name']}」，準備進入派發中心。"), 200
 
 
 # ── Expert review (save comment + recommendation, no finalise) ───────

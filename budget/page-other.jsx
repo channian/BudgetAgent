@@ -1268,6 +1268,10 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
   const [frontendCases,setFrontendCases]= React.useState([]);
   const [casesLoading, setCasesLoading] = React.useState(true);
   const [confirmBusy,  setConfirmBusy]  = React.useState({});
+  // Manual AI建單 ↔ 前端建單 mapping picker
+  const [mergeOpenId,  setMergeOpenId]  = React.useState(null);
+  const [mergeTarget,  setMergeTarget]  = React.useState("");
+  const [mergeBusy,    setMergeBusy]    = React.useState(false);
   const fileRef = React.useRef();
 
   // Sheet picker modal state: null | { file, sheets: [...], selected: str }
@@ -1299,6 +1303,23 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
       Toast.show(`❌ 確認失敗：${e.message}`, "err");
     } finally {
       setConfirmBusy(s => ({ ...s, [b.dbId]: false }));
+    }
+  };
+
+  const doMerge = async (b) => {
+    if (!mergeTarget) return;
+    setMergeBusy(true);
+    try {
+      const res = await API.mergeAiCase(b.dbId, Number(mergeTarget));
+      Toast.show(`✅ ${res.message || "已合併"}`, "ok");
+      setMergeOpenId(null);
+      setMergeTarget("");
+      loadCases();
+      onRefresh && onRefresh();
+    } catch (e) {
+      Toast.show(`❌ 合併失敗：${e.message}`, "err");
+    } finally {
+      setMergeBusy(false);
     }
   };
 
@@ -1422,32 +1443,73 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
             <div className="empty">目前沒有待確認的 AI 建單</div>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 120px 120px 110px 100px",
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 110px 120px 110px 160px",
                             gap: "0 10px", padding: "8px 14px", background: "var(--surface-2)",
                             fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)",
                             letterSpacing: "0.04em", borderBottom: "1px solid var(--border)" }}>
                 <div>週</div><div>項目名稱</div><div>類別</div><div>金額</div><div>AI 結果</div><div>操作</div>
               </div>
               {aiCases.map(b => (
-                <div key={b.dbId} style={{ display: "grid", gridTemplateColumns: "60px 1fr 120px 120px 110px 100px",
-                                           gap: "0 10px", padding: "10px 14px", alignItems: "center",
-                                           borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-                  <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
-                  <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                       title={b.project}>{b.project}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{b.subCategory || b.category || "—"}</div>
-                  <div style={{ fontFamily: "monospace", fontSize: 12, textAlign: "right" }}>
-                    NT$ {(Number(b.amount) || 0).toLocaleString()}
+                <React.Fragment key={b.dbId}>
+                  <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 110px 120px 110px 160px",
+                                             gap: "0 10px", padding: "10px 14px", alignItems: "center",
+                                             borderBottom: mergeOpenId === b.dbId ? "none" : "1px solid var(--border)", fontSize: 13 }}>
+                    <div><span className="week-pill">W{String(b.week).padStart(2, "0")}</span></div>
+                    <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                         title={b.project}>{b.project}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{b.subCategory || b.category || "—"}</div>
+                    <div style={{ fontFamily: "monospace", fontSize: 12, textAlign: "right" }}>
+                      NT$ {(Number(b.amount) || 0).toLocaleString()}
+                    </div>
+                    <div><ResultBadge result={b.aiResult} kind="ai"/></div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn accent sm" disabled={!!confirmBusy[b.dbId]}
+                              onClick={() => doConfirm(b)}
+                              style={{ fontSize: 11, padding: "3px 10px" }}>
+                        {confirmBusy[b.dbId] ? "確認中…" : "✓ 確認"}
+                      </button>
+                      <button className="btn ghost sm" title="與前端建單手動配對"
+                              onClick={() => {
+                                setMergeOpenId(o => o === b.dbId ? null : b.dbId);
+                                setMergeTarget("");
+                              }}
+                              style={{ fontSize: 11, padding: "3px 8px" }}>
+                        🔗 配對
+                      </button>
+                    </div>
                   </div>
-                  <div><ResultBadge result={b.aiResult} kind="ai"/></div>
-                  <div>
-                    <button className="btn accent sm" disabled={!!confirmBusy[b.dbId]}
-                            onClick={() => doConfirm(b)}
-                            style={{ fontSize: 11, padding: "3px 10px" }}>
-                      {confirmBusy[b.dbId] ? "確認中…" : "✓ 確認"}
-                    </button>
-                  </div>
-                </div>
+                  {mergeOpenId === b.dbId && (
+                    <div style={{ padding: "10px 14px", background: "var(--surface-2)",
+                                   borderBottom: "1px solid var(--border)",
+                                   display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        「{b.project}」其實是這筆前端建單：
+                      </span>
+                      {frontendCases.length === 0 ? (
+                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>目前沒有等待中的前端建單可供配對</span>
+                      ) : (
+                        <>
+                          <select className="field-sel" value={mergeTarget}
+                                  onChange={e => setMergeTarget(e.target.value)}>
+                            <option value="">— 選擇前端建單 —</option>
+                            {frontendCases.map(f => (
+                              <option key={f.dbId} value={f.dbId}>
+                                {f.project}（W{String(f.week).padStart(2, "0")} · NT$ {(Number(f.amount) || 0).toLocaleString()}）
+                              </option>
+                            ))}
+                          </select>
+                          <button className="btn accent sm" disabled={!mergeTarget || mergeBusy}
+                                  onClick={() => doMerge(b)}>
+                            {mergeBusy ? "合併中…" : "確認合併"}
+                          </button>
+                        </>
+                      )}
+                      <button className="btn ghost sm" onClick={() => { setMergeOpenId(null); setMergeTarget(""); }}>
+                        取消
+                      </button>
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
             </>
           )}
@@ -1455,7 +1517,8 @@ function DataImportPage({ onNew, onRefresh, currentUser }) {
         <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 12,
                       color: "var(--text-muted)", borderTop: "1px solid var(--border)", lineHeight: 1.7 }}>
           💡 AI pipeline 已自動建立並完成初審。點「確認」後案件立即進入派發中心，供管理員指派專家。
-          若預算單名稱與前端建立的案件相同，建立新預算單時會自動完成合併。
+          若預算單名稱與前端建立的案件相同，建立新預算單時會自動完成合併；
+          名稱沒對上的話，可點「🔗 配對」手動指定對應的前端建單，合併後會以前端建單的名稱為準。
         </div>
       </div>
 

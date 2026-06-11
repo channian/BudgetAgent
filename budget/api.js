@@ -287,6 +287,9 @@ async function apiReleaseLock(dbId) {
 async function apiConfirmFrontend(dbId) {
   return apiFetch(`/api/budgets/${dbId}/confirm-frontend`, { method: "POST" });
 }
+async function apiMergeAiCase(aiId, frontendId) {
+  return apiFetch(`/api/budgets/${aiId}/merge-into/${frontendId}`, { method: "POST" });
+}
 
 // ── Users ─────────────────────────────────────────────────────────────
 async function apiFetchUsers() {
@@ -521,6 +524,7 @@ window.API = {
   acquireLock:         apiAcquireLock,
   releaseLock:         apiReleaseLock,
   confirmFrontend:     apiConfirmFrontend,
+  mergeAiCase:         apiMergeAiCase,
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,
