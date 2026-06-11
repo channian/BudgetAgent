@@ -8,6 +8,20 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _big5_safe(text: str) -> str:
+    """Replace any character outside the Big5 repertoire with its HTML numeric
+    entity so the body can be sent with charset=big5 — needed because the
+    internal mail relay / Lotus Notes 6.5 client renders UTF-8 中文 as 亂碼。"""
+    out = []
+    for ch in text:
+        try:
+            ch.encode("big5")
+            out.append(ch)
+        except UnicodeEncodeError:
+            out.append(f"&#{ord(ch)};")
+    return "".join(out)
+
+
 def _resolve_cc(category, system, expert_name, to_email):
     """Build the final CC list = fixed CC + matched rule CC, honoring test mode.
 
@@ -118,7 +132,7 @@ def send_dispatch_email(
     html_body = f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
-<head><meta charset="UTF-8"/></head>
+<head><meta charset="Big5"/></head>
 <body style="margin:0;padding:0;background:#f7f5f0;font-family:'Segoe UI',Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f7f5f0;padding:32px 0;">
     <tr><td align="center">
@@ -128,10 +142,10 @@ def send_dispatch_email(
 
         <!-- Header -->
         <tr>
-          <td style="background:linear-gradient(135deg,#e86b4f,#c0456a);
+          <td style="background-color:#c0456a;background:linear-gradient(135deg,#e86b4f,#c0456a);
                      padding:28px 32px;color:#fff;">
             <div style="font-size:13px;opacity:0.85;letter-spacing:0.06em;margin-bottom:6px;">
-              預算AI審核平台 · ASE Smart System
+              預算AI審核平台
             </div>
             <div style="font-size:22px;font-weight:700;line-height:1.2;">
               您有一筆待審核的預算案件
@@ -215,7 +229,7 @@ def send_dispatch_email(
             <div style="background:#fff8e1;border-left:4px solid #f59e0b;
                         border-radius:4px;padding:12px 16px;
                         font-size:13px;color:#92660a;line-height:1.6;">
-              ⏱ <strong>SLA 提醒：</strong>
+              <strong>SLA 提醒：</strong>
               請於派送後 <strong>3 個工作天內</strong> 完成審核，逾期將觸發系統催辦通知。
             </div>
           </td>
@@ -256,7 +270,7 @@ def send_dispatch_email(
             msg["Cc"] = ", ".join(cc_list)
             recipients.extend(cc_list)
 
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(MIMEText(_big5_safe(html_body), "html", "big5"))
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
             server.sendmail(SMTP_SENDER, recipients, msg.as_string())

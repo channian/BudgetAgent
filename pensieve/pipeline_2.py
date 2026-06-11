@@ -27,7 +27,7 @@ Pipeline Step 2 — 從剪貼簿讀取線上 AI 審核結果並寫入資料庫
           （pyperclip 可選；若未安裝則需手動提供 JSON 檔案）
 """
 
-import json, re, hashlib, datetime, difflib
+import os, json, re, hashlib, datetime, difflib
 import psycopg2, psycopg2.extras
 
 # ── 資料庫設定 ──────────────────────────────────────────────────────────
@@ -41,6 +41,23 @@ DB_CONFIG = {
 }
 DECIDED_STATUSES      = ("CLOSED", "REJECTED", "PENDING_ACTION")
 FUZZY_MATCH_THRESHOLD = 0.82
+
+# ── 執行紀錄 / 剪貼簿重複偵測 ────────────────────────────────────────────
+# 排程執行時看不到 console，所以同時把每行輸出附加寫入 log 檔；
+# 並記錄上次處理過的剪貼簿內容雜湊，若這次跟上次完全相同，代表
+# 很可能忘記重新複製線上 AI 的最新結果。
+SCRIPT_DIR          = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE            = os.path.join(SCRIPT_DIR, "pipeline_2_log.txt")
+LAST_CLIPBOARD_FILE = os.path.join(SCRIPT_DIR, "pipeline_2_last_clipboard.sha256")
+
+
+def _log(msg: str):
+    print(msg)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
+    except Exception:
+        pass
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -198,11 +215,11 @@ def _find_project(cur, incoming_name: str):
 #  寫入資料庫
 # ════════════════════════════════════════════════════════════════════════
 def _write_db(merged: list):
-    print("\n🚀 開始寫入資料庫…")
+    _log("\n🚀 開始寫入資料庫…")
     try:
         conn = psycopg2.connect(**DB_CONFIG)
     except Exception as e:
-        print(f"❌ 無法連線資料庫：{e}")
+        _log(f"❌ 無法連線資料庫：{e}")
         return
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     _, iso_week, _ = datetime.datetime.now().isocalendar()
@@ -211,7 +228,7 @@ def _write_db(merged: list):
     for item in merged:
         project = (item.get("案件名稱") or "").strip()
         if not project:
-            print("⚠️  缺少案件名稱，略過此筆")
+            _log("⚠️  缺少案件名稱，略過此筆")
             continue
 
         category     = item.get("判定類別") or None
@@ -229,10 +246,10 @@ def _write_db(merged: list):
         try:
             canonical, existing = _find_project(cur, project)
             if canonical and canonical != project:
-                print(f"   🔀 模糊匹配：「{project}」→「{canonical}」")
+                _log(f"   🔀 模糊匹配：「{project}」→「{canonical}」")
 
             if any(_row_signature(ex) == incoming_sig for ex in existing):
-                print(f"⏭  資料未變，略過 {project}")
+                _log(f"⏭  資料未變，略過 {project}")
                 ok += 1
                 continue
 
@@ -249,7 +266,7 @@ def _write_db(merged: list):
                 )
                 conn.commit()
                 budget_id = cur.fetchone()["id"]
-                print(f"🔄  updated id={budget_id}  {canonical or project}")
+                _log(f"🔄  updated id={budget_id}  {canonical or project}")
                 ok += 1
                 continue
 
@@ -274,54 +291,70 @@ def _write_db(merged: list):
             )
             conn.commit()
             budget_id = cur.fetchone()["id"]
-            print(f"✅  {action} id={budget_id}  {insert_name}")
+            _log(f"✅  {action} id={budget_id}  {insert_name}")
             ok += 1
 
         except Exception as e:
             import traceback
             conn.rollback()
-            print(f"❌  {project} 失敗：{e}")
-            traceback.print_exc()
+            _log(f"❌  {project} 失敗：{e}")
+            _log(traceback.format_exc())
             fail += 1
 
     cur.close()
     conn.close()
-    print(f"\n完成：{ok} 成功 / {fail} 失敗")
+    _log(f"\n完成：{ok} 成功 / {fail} 失敗")
     if ok > 0:
-        print("請重新整理平台頁面查看案件。")
+        _log("請重新整理平台頁面查看案件。")
 
 
 # ════════════════════════════════════════════════════════════════════════
 def process():
-    print("📋 讀取剪貼簿…")
+    _log("📋 讀取剪貼簿…")
     raw = _read_clipboard()
 
     if not raw:
-        print("❌ 剪貼簿為空，請確認線上 AI 結果已複製至剪貼簿")
+        _log("❌ 剪貼簿為空，請確認線上 AI 結果已複製至剪貼簿")
         return
+
+    # 偵測剪貼簿是否跟上次執行時完全相同（很可能是忘記重新複製最新結果）
+    clip_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    try:
+        with open(LAST_CLIPBOARD_FILE, encoding="utf-8") as f:
+            last_hash = f.read().strip()
+    except Exception:
+        last_hash = ""
+    if clip_hash == last_hash:
+        _log("⚠️  剪貼簿內容與上次執行時完全相同！很可能是忘記重新複製線上 AI 的最新結果，"
+             "本次仍會嘗試寫入，若資料確實未變則下方會顯示「資料未變，略過」。")
+    try:
+        with open(LAST_CLIPBOARD_FILE, "w", encoding="utf-8") as f:
+            f.write(clip_hash)
+    except Exception:
+        pass
 
     ai_results = _parse_clipboard(raw)
     if not ai_results:
-        print("❌ 剪貼簿內容無法解析為 JSON 陣列，請確認格式正確")
-        print(f"   （前 200 字）{raw[:200]}")
+        _log("❌ 剪貼簿內容無法解析為 JSON 陣列，請確認格式正確")
+        _log(f"   （前 200 字）{raw[:200]}")
         return
 
-    print(f"✅ 解析到 {len(ai_results)} 筆線上 AI 審核結果")
+    _log(f"✅ 解析到 {len(ai_results)} 筆線上 AI 審核結果")
 
     merged = []
     for item in ai_results:
         name = (item.get("案件名稱") or "").strip()
         if not name:
-            print("⚠️  某筆缺少案件名稱，略過")
+            _log("⚠️  某筆缺少案件名稱，略過")
             continue
 
         merged.append(item)
         decision = item.get("最終決策", "?")
         score    = item.get("AI對於保留案件的信心分數") or item.get("信心分數") or 0
-        print(f"  ✔ {name}  →  {decision}（信心 {score}）")
+        _log(f"  ✔ {name}  →  {decision}（信心 {score}）")
 
     if not merged:
-        print("ℹ️  沒有有效案件可寫入。")
+        _log("ℹ️  沒有有效案件可寫入。")
         return
 
     _write_db(merged)
