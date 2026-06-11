@@ -67,6 +67,12 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
     } catch (err) { alert("刪除失敗：" + err.message); }
   };
 
+  const handleDownloadAtt = async (att) => {
+    try {
+      await API.downloadAttachment(att.id, att.original_name);
+    } catch (err) { alert("下載失敗：" + err.message); }
+  };
+
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const applyAiJson = () => {
@@ -326,7 +332,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                       <div key={att.id} className="flex-row" style={{ background: "var(--surface-2)", padding: "8px 12px", borderRadius: "var(--radius-sm)", gap: 8 }}>
                         <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={att.original_name}>{att.original_name}</span>
                         <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtFileSize(att.file_size)}</span>
-                        <button className="btn ghost sm" style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => API.downloadAttachment(att.id, att.original_name)}>下載</button>
+                        <button className="btn ghost sm" style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => handleDownloadAtt(att)}>下載</button>
                         <button className="btn ghost sm" style={{ padding: "2px 8px", fontSize: 11, color: "var(--bad)" }} onClick={() => handleDeleteAtt(att)}>✕</button>
                       </div>
                     ))}

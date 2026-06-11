@@ -58,6 +58,14 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
     }
   };
 
+  const handleDownloadAtt = async (att) => {
+    try {
+      await API.downloadAttachment(att.id, att.original_name);
+    } catch (err) {
+      alert("下載失敗：" + err.message);
+    }
+  };
+
   const fmtFileSize = (bytes) => {
     if (!bytes) return "—";
     if (bytes < 1024)       return `${bytes} B`;
@@ -359,7 +367,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
                       <button
                         className="btn ghost sm"
                         style={{ padding: "2px 10px", fontSize: 11 }}
-                        onClick={() => API.downloadAttachment(att.id, att.original_name)}
+                        onClick={() => handleDownloadAtt(att)}
                       >
                         下載
                       </button>

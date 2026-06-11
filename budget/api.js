@@ -431,8 +431,11 @@ async function apiDownloadAttachment(attId, originalName) {
   }
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") || "";
-  const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)/i);
-  const fname = m ? decodeURIComponent(m[1].trim()) : (originalName || `attachment_${attId}`);
+  let fname = originalName || `attachment_${attId}`;
+  const star = cd.match(/filename\*=UTF-8''([^;\r\n]+)/i);
+  const plain = cd.match(/filename=["']?([^"';\r\n]+)/i);
+  if (star) fname = decodeURIComponent(star[1].trim());
+  else if (plain) fname = plain[1].trim();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = fname;

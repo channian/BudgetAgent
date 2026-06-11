@@ -1,5 +1,6 @@
 import os, uuid, datetime, decimal
-from flask import Blueprint, request, jsonify, send_file
+from urllib.parse import quote
+from flask import Blueprint, request, jsonify, send_file, make_response
 from db import cursor as db_cursor
 from routes.auth import require_auth, current_user
 
@@ -107,7 +108,22 @@ def download_attachment(att_id):
     path = os.path.join(UPLOAD_DIR, str(r["budget_id"]), r["filename"])
     if not os.path.exists(path):
         return jsonify(error="檔案不存在"), 404
-    return send_file(path, download_name=r["original_name"], as_attachment=True)
+
+    # Build Content-Disposition manually (RFC 5987) so non-ASCII (Chinese)
+    # filenames download correctly regardless of the deployed Werkzeug
+    # version's send_file()/download_name support.
+    original_name = r["original_name"] or r["filename"]
+    ascii_name = original_name.encode("ascii", "ignore").decode("ascii")
+    ascii_name = ascii_name.replace('"', "").replace("\\", "").strip()
+    if not ascii_name:
+        ascii_name = r["filename"]
+
+    resp = make_response(send_file(path, as_attachment=True))
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(original_name, safe='')}"
+    )
+    return resp
 
 
 @attachments_bp.delete("/attachments/<int:att_id>")
