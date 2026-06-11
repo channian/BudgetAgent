@@ -2,15 +2,18 @@
 Pipeline Step 2 — 從剪貼簿讀取線上 AI 審核結果並寫入資料庫
 ══════════════════════════════════════════════════════════════
 流程：
-  pipeline_1 → 分類結果複製至剪貼簿
-  RPA 取走 → 送至線上 AI 審核
-  線上 AI 輸出 → 複製至剪貼簿
-  本腳本讀取剪貼簿 → 合併 pipeline_1 分類資訊 → 寫入 DB
+  pipeline_1 → 分類 + 全文 複製至剪貼簿
+  使用者貼至線上 AI 審核 → AI 輸出（分類欄位原樣帶回 + 審核結果）→ 複製至剪貼簿
+  本腳本讀取剪貼簿 → 直接寫入 DB
 
-剪貼簿輸入格式（線上 AI 輸出，JSON 陣列）：
+剪貼簿輸入格式（線上 AI 輸出，JSON 陣列；判定系統/判定類別/負責專家
+由 AI 從輸入原樣帶回，不需再合併 system_defined.json）：
   [
     {
       "案件名稱": "...",
+      "判定系統": "...",
+      "判定類別": "...",
+      "負責專家": "...",
       "最終決策": "通過 | 退件",
       "AI對於保留案件的信心分數": 85,
       "原因": "..."
@@ -18,21 +21,14 @@ Pipeline Step 2 — 從剪貼簿讀取線上 AI 審核結果並寫入資料庫
     ...
   ]
 
-分類資訊（判定系統/判定類別/負責專家）從 system_defined.json 讀取並合併。
-若找不到對應案件，仍可寫入 DB（分類欄位留空，待後續補齊）。
-
 前置：
-  • pipeline_1.py 已執行，system_defined.json 存在於 WORK_DIR
   • 剪貼簿已放入線上 AI 輸出的 JSON 陣列
   • 套件：pip install psycopg2-binary pyperclip
           （pyperclip 可選；若未安裝則需手動提供 JSON 檔案）
 """
 
-import os, sys, json, re, hashlib, datetime, difflib
+import json, re, hashlib, datetime, difflib
 import psycopg2, psycopg2.extras
-
-WORK_DIR            = r"D:\ASEKH\K20076\2026\預算AI Agent\新思路0409\初步審核"
-SYSTEM_DEFINED_JSON = os.path.join(WORK_DIR, "system_defined.json")
 
 # ── 資料庫設定 ──────────────────────────────────────────────────────────
 DB_CONFIG = {
@@ -104,48 +100,14 @@ def _parse_clipboard(text: str) -> list:
 
 
 # ════════════════════════════════════════════════════════════════════════
-#  合併 pipeline_1 分類資訊
+#  DB 去重 / 補送邏輯（同 pipeline_2_old / rpa/ingest.py）
 # ════════════════════════════════════════════════════════════════════════
-def _load_classification_map() -> dict:
-    """讀 system_defined.json，回傳 {案件名稱: case_dict}。"""
-    if not os.path.exists(SYSTEM_DEFINED_JSON):
-        print(f"⚠️  找不到 {SYSTEM_DEFINED_JSON}，分類資訊將留空")
-        return {}
-    try:
-        with open(SYSTEM_DEFINED_JSON, encoding="utf-8") as f:
-            cases = json.load(f)
-        return {c.get("案件名稱", ""): c for c in cases if c.get("案件名稱")}
-    except Exception as e:
-        print(f"⚠️  讀取 system_defined.json 失敗：{e}")
-        return {}
-
-
 def _norm_name(s: str) -> str:
     s = (s or "").strip()
     s = re.sub(r"[\s\-_—–（）()【】\[\]、，,。./\\：:]+", "", s)
     return s.lower()
 
 
-def _find_classification(name: str, cls_map: dict) -> dict:
-    """以精確→正規化→模糊三階段在 cls_map 中找對應的 pipeline_1 分類紀錄。"""
-    if name in cls_map:
-        return cls_map[name]
-
-    norm_in = _norm_name(name)
-    for k, v in cls_map.items():
-        if _norm_name(k) == norm_in:
-            return v
-
-    close = difflib.get_close_matches(name, list(cls_map.keys()), n=1, cutoff=FUZZY_MATCH_THRESHOLD)
-    if close:
-        return cls_map[close[0]]
-
-    return {}
-
-
-# ════════════════════════════════════════════════════════════════════════
-#  DB 去重 / 補送邏輯（同 pipeline_2_old / rpa/ingest.py）
-# ════════════════════════════════════════════════════════════════════════
 def _rpa_signature(category, sub_category, expert_name, ai_comment, ai_result_dict):
     ai_str = json.dumps(ai_result_dict, sort_keys=True, ensure_ascii=False) if ai_result_dict else ""
     parts  = [
@@ -343,9 +305,6 @@ def process():
 
     print(f"✅ 解析到 {len(ai_results)} 筆線上 AI 審核結果")
 
-    cls_map = _load_classification_map()
-    print(f"📂 已載入 {len(cls_map)} 筆 pipeline_1 分類資訊")
-
     merged = []
     for item in ai_results:
         name = (item.get("案件名稱") or "").strip()
@@ -353,22 +312,9 @@ def process():
             print("⚠️  某筆缺少案件名稱，略過")
             continue
 
-        cls = _find_classification(name, cls_map)
-        if not cls:
-            print(f"  ⚠️  找不到「{name}」的分類資訊，改用 AI 輸出中的分類欄位")
-
-        # system_defined.json 優先；找不到時用 AI 輸出中 echo 回來的分類欄位
-        merged.append({
-            "案件名稱":              name,
-            "判定類別":              cls.get("判定類別") or item.get("判定類別"),
-            "判定系統":              cls.get("判定系統") or item.get("判定系統"),
-            "負責專家":              cls.get("負責專家") or item.get("負責專家"),
-            "最終決策":              item.get("最終決策"),
-            "AI對於保留案件的信心分數": item.get("AI對於保留案件的信心分數") or item.get("信心分數") or 0,
-            "原因":                  item.get("原因", ""),
-        })
+        merged.append(item)
         decision = item.get("最終決策", "?")
-        score    = merged[-1]["AI對於保留案件的信心分數"]
+        score    = item.get("AI對於保留案件的信心分數") or item.get("信心分數") or 0
         print(f"  ✔ {name}  →  {decision}（信心 {score}）")
 
     if not merged:

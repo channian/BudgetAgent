@@ -71,7 +71,7 @@ flowchart TD
 
   AI_REVIEW[🌐 線上 AI 審核\n依 audit_prompt.md 規則\n判定每個案件]
 
-  AI_OUT([📄 線上 AI 輸出 JSON\n案件名稱 / 最終決策\n信心分數 / 原因])
+  AI_OUT([📄 線上 AI 輸出 JSON\n案件名稱 / 判定系統 / 判定類別 / 負責專家\n最終決策 / 信心分數 / 原因\n（分類欄位由 AI 原樣帶回）])
 
   U_COPY([👤 使用者\nCtrl+C 複製 AI 輸出])
 
@@ -87,9 +87,7 @@ flowchart TD
   P2_PARSE{解析 JSON\n4 層 fallback}
   P2_PARSE_FAIL([❌ 無法解析 JSON\n顯示前 200 字])
 
-  P2_CLS[載入 system_defined.json\npipeline_1 分類資訊]
-
-  P2_MERGE[逐筆合併\n三階段比對 精確→正規化→模糊82%\n分類優先用 pipeline_1\n找不到才用 AI 輸出]
+  P2_NORM[逐筆檢查案件名稱\n（normalize 版：去除「原因」中的 \n）]
 
   %% ══════════════════════════════════
   %%  PHASE 4 — 寫入 DB
@@ -129,10 +127,10 @@ flowchart TD
   U_COPY --> P2_RUN --> P2_CB --> P2_CB_EMPTY
   P2_CB_EMPTY -- 是 --> P2_CB_FAIL
   P2_CB_EMPTY -- 否 --> P2_PARSE
-  P2_PARSE -- 成功 --> P2_CLS --> P2_MERGE
+  P2_PARSE -- 成功 --> P2_NORM
   P2_PARSE -- 失敗 --> P2_PARSE_FAIL
 
-  P2_MERGE --> DB_CONN
+  P2_NORM --> DB_CONN
   DB_CONN -- 成功 --> DB_LOOP
   DB_CONN -- 失敗 --> DB_FAIL
 
@@ -164,7 +162,7 @@ flowchart TD
   class P1_RUN,P1_READ,P1_RULE,P1_RULE_OK,P1_LLM,P1_LLM_OK,P1_CAT,P1_EXP,P1_SAVE,P1_CLIP phase1
   class P1_CLIP_OK,U_PASTE,U_COPY user
   class AI_REVIEW,AI_OUT online
-  class P2_RUN,P2_CB,P2_CB_EMPTY,P2_PARSE,P2_CLS,P2_MERGE phase2
+  class P2_RUN,P2_CB,P2_CB_EMPTY,P2_PARSE,P2_NORM phase2
   class DB_CONN,DB_LOOP,DB_FIND,DB_SIG,DB_STATUS db
   class DB_INSERT,DB_UPDATE,DB_SUPP,DONE ok
   class P2_CB_FAIL,P2_PARSE_FAIL,DB_FAIL,DB_ERR fail
@@ -181,13 +179,13 @@ flowchart TD
         <td><span class="badge" style="background:#ede9fe;border:1px solid #7c3aed;color:#4c1d95">① Pipeline 1</span></td>
         <td><code>pipeline_1.py</code></td>
         <td>網路資料夾（各案件文件）</td>
-        <td><code>system_defined.json</code> + 結果複製到剪貼簿</td>
+        <td>分類 + 全文，結果複製到剪貼簿</td>
       </tr>
       <tr>
         <td><span class="badge" style="background:#dbeafe;border:1px solid #3b82f6;color:#1e3a8a">② 線上 AI 審核</span></td>
         <td>手動 / RPA</td>
-        <td>剪貼簿（P1 輸出）→ 貼到 ChatGPT/Claude</td>
-        <td>每案件：最終決策 + 信心分數 + 原因</td>
+        <td>剪貼簿（P1 輸出：分類 + 全文）→ 貼到 ChatGPT/Claude</td>
+        <td>每案件：判定系統/判定類別/負責專家（原樣帶回）+ 最終決策 + 信心分數 + 原因</td>
       </tr>
       <tr>
         <td><span class="badge" style="background:#fce7f3;border:1px solid #ec4899;color:#831843">③ 複製 AI 輸出</span></td>
@@ -197,9 +195,9 @@ flowchart TD
       </tr>
       <tr>
         <td><span class="badge" style="background:#e0f2fe;border:1px solid #0284c7;color:#0c4a6e">④ Pipeline 2</span></td>
-        <td><code>pipeline_2.py</code></td>
-        <td>剪貼簿（AI 審核結果）+ <code>system_defined.json</code></td>
-        <td>寫入 PostgreSQL <code>budget.budget_requests</code></td>
+        <td><code>pipeline_2.py</code> / <code>pipeline_2_normalize.py</code></td>
+        <td>剪貼簿（AI 審核結果，含分類欄位）</td>
+        <td>直接寫入 PostgreSQL <code>budget.budget_requests</code>（不再讀取 system_defined.json）</td>
       </tr>
     </tbody>
   </table>
