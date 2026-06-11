@@ -29,6 +29,7 @@ const EXPERT_COLS = [
   { k: "aiResult",    label: "AI 初審結果",  w: 260, min: 200 },
   { k: "status",      label: "狀態",         w: 110, min: 90 },
   { k: "dispatchDate",label: "派送日期",     w: 130, sortable: true, min: 110 },
+  { k: "slaLight",    label: "SLA",          w: 110, min: 90 },
 ];
 
 // Columns shown for AI_REVIEW block on main page
@@ -1080,6 +1081,7 @@ function renderCell(b, k) {
         </span>
       : <span style={{ color: "var(--text-muted)" }}>—</span>;
     case "dispatchDate": return MOCK.fmtDateShort(b.dispatchDate);
+    case "slaLight":     return <SlaLight budget={b}/>;
     case "signDate":     return b.signDate ? MOCK.fmtDateShort(b.signDate) : "—";
     case "cycle":        return <CycleTag disp={b.dispatchDate} sign={b.signDate}/>;
     default:             return null;

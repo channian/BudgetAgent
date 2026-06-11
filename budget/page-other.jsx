@@ -775,6 +775,7 @@ function AssignmentPage({ currentUser }) {
                 <div>負責專家</div>
                 <div>派發日期</div>
                 <div>狀態</div>
+                <div>SLA</div>
                 <div style={{ textAlign: "right" }}>操作</div>
               </div>
               {dispatched.filter(b =>
@@ -787,6 +788,7 @@ function AssignmentPage({ currentUser }) {
                   <div>{b.expertName || <span style={{ color: "var(--text-muted)" }}>未指定</span>}</div>
                   <div className="mono" style={{ fontSize: 12 }}>{fmtDate(b.dispatchDate)}</div>
                   <div><StatusBadge status={b.status}/></div>
+                  <div><SlaLight budget={b}/></div>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     <button className="btn sm ghost" onClick={() => openReassign(b)}>重派</button>
                     {isAdmin && (

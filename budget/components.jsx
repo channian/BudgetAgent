@@ -139,6 +139,32 @@ function ResultBadge({ result, kind }) {
   return <span className={`badge ${s.cls}`}><span className="b-dot" />{s.label}</span>;
 }
 
+// SLA 燈號門檻（天數，從派送日期起算）— 須與 backend/utils/sla.py 一致
+//   黃燈：第 3 天起，紅燈：第 6 天起（提前一天）
+// 一旦案件填寫專家評論（進入待簽核），即不再顯示燈號。
+const SLA_YELLOW_DAYS = 3;
+const SLA_RED_DAYS    = 6;
+
+function slaInfo(b) {
+  if (b.status !== "EXPERT_REVIEW") return null;
+  if (b.expertComment && b.expertComment.trim()) return null;
+  if (!b.dispatchDate) return null;
+  const days = Math.floor((Date.now() - new Date(b.dispatchDate)) / 86400000);
+  if (days >= SLA_RED_DAYS)    return { level: "red",    days };
+  if (days >= SLA_YELLOW_DAYS) return { level: "yellow", days };
+  return { level: "green", days };
+}
+
+function SlaLight({ budget }) {
+  const info = slaInfo(budget);
+  if (!info || info.level === "green") {
+    return <span style={{ color: "var(--text-muted)" }}>—</span>;
+  }
+  return info.level === "red"
+    ? <span className="badge bad"><span className="b-dot"/>🔴 紅燈 {info.days}天</span>
+    : <span className="badge warn"><span className="b-dot"/>🟡 黃燈 {info.days}天</span>;
+}
+
 function Conf({ value }) {
   const v = value / 100;
   const tier = v >= 0.8 ? "hi" : v >= 0.6 ? "md" : "lo";
