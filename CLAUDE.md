@@ -36,7 +36,7 @@ Flask runs inside a **virtualenv** on the host machine.
 ## Pipeline & DB Write Verification
 
 **Recurring issue: data appears in backup files but never reaches the DB.**
-- After any pipeline run (`pipeline_1`, `pipeline_2`, `pipeline_2_normalize`), always verify with a `SELECT count(*)` before and after — do not trust backup file creation as proof of DB write.
+- After any pipeline run (`pipeline_1`, `pipeline_2`), always verify with a `SELECT count(*)` before and after — do not trust backup file creation as proof of DB write.
 - The actual primary key column is **`id`** (not `db_id` — CLAUDE.md schema docs below use `db_id` for historical reasons but the live table uses `id`).
 - `pipeline_2.py` reads from clipboard; if results appear parsed but nothing writes, first check: (a) old file still on server (see Deployment Constraint), (b) console for `❌` lines with full traceback.
 - Confirm the exact JSON format/path **before** writing any field-mapping code to avoid rewrites.

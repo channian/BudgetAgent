@@ -18,11 +18,8 @@ psql -h 10.10.28.170 -U <user> -d CIM -c "SELECT COUNT(*) FROM budget.budget_req
 ## Step 2 — 執行 pipeline
 
 ```bash
-# pipeline_2（綫上 AI，剪貼簿 → DB）
+# pipeline_2（綫上 AI，剪貼簿 → DB；ai_comment 內的 \n 會自動去除）
 python pensieve/pipeline_2.py
-
-# pipeline_2_normalize（同上，但去除 ai_comment 的 \n）
-python pensieve/pipeline_2_normalize.py
 ```
 
 觀察 console 輸出：

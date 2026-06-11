@@ -240,7 +240,7 @@ def _write_db(merged: list):
         category     = item.get("判定類別") or None
         sub_category = item.get("判定系統") or None
         expert_name  = item.get("負責專家") or None
-        ai_comment   = (item.get("原因") or "").strip()
+        ai_comment   = re.sub(r"\s*\n\s*", " ", (item.get("原因") or "")).strip()
         ai_result_dict = {
             "AI處置結果":        item.get("最終決策"),
             "保留案件的信心分數": item.get("AI對於保留案件的信心分數"),
