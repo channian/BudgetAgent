@@ -9,7 +9,8 @@ from routes.budgets import budgets_bp
 from routes.notifications import notifications_bp
 from routes.users import users_bp
 from routes.library import library_bp, init_library_schema
-from routes.budgets import init_lock_columns
+from routes.budgets import init_lock_columns, init_frontend_submitted_column
+from routes.attachments import attachments_bp, init_attachments_schema
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -21,11 +22,16 @@ app.register_blueprint(budgets_bp,       url_prefix="/api")
 app.register_blueprint(notifications_bp, url_prefix="/api")
 app.register_blueprint(users_bp,         url_prefix="/api")
 app.register_blueprint(library_bp,       url_prefix="/api")
+app.register_blueprint(attachments_bp,   url_prefix="/api")
 
 # Provision RAG library tables + seed 16 placeholder systems
 init_library_schema()
 # Add concurrency lock columns if not already present
 init_lock_columns()
+# Add frontend_submitted flag column (tracks whether a human confirmed the case)
+init_frontend_submitted_column()
+# Create attachments table + uploads directory
+init_attachments_schema()
 
 # ── Serve frontend static files ───────────────────────────────────────
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "budget")

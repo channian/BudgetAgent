@@ -6,7 +6,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > current config/hosts, and known traps. This file (CLAUDE.md) holds the fixed
 > schema + rules; HANDOVER.md holds the living project state.
 
-## Project Overview
+## Deployment Constraint
+
+**The Flask host machine has NO git access — the firewall blocks git pull/push entirely.**
+The user manually downloads changed files from GitHub after each commit.
+- NEVER assume `git push` propagates fixes to the running server automatically.
+- After every change, explicitly tell the user **which files changed** so they know what to re-download.
+- If a bug appears "still not fixed" after a commit, the first hypothesis is that the old file is still on the server — ask the user to confirm they re-downloaded the updated file.
+
+## Python Environment
+
+Flask runs inside a **virtualenv** on the host machine.
+- ALWAYS verify dependencies (especially `ldap3`, `psycopg2-binary`, `pyperclip`) are installed **inside the venv**, not system Python.
+- When debugging import errors or auth failures, check with `<venv>/Scripts/pip list` (Windows) before assuming the package is missing.
+- Do NOT run `pip install` against system Python — it will appear to succeed but have no effect on the running Flask app.
+
+## AD Authentication Config
+
+- **Correct domain: `KH`** (not `ASE` — a common mistake that breaks all NTLM binds).
+- Login uses **empno** (= Windows sAMAccountName) as the username, with the Windows password via NTLM bind.
+- AD server: `10.10.10.2` (KHADDC04), UPN suffix: `kh.asegroup.com`.
+- When AD login fails, diagnose in this order:
+  1. Is `ldap3` installed in the Flask **venv**?
+  2. Is the domain set to `KH` in `backend/config.py`?
+  3. Is NTLM enabled on the DC?
+  4. Is the AD server IP reachable?
+- Falls back to local password hash if AD is unreachable.
+
+## Pipeline & DB Write Verification
+
+**Recurring issue: data appears in backup files but never reaches the DB.**
+- After any pipeline run (`pipeline_1`, `pipeline_2`, `pipeline_2_normalize`), always verify with a `SELECT count(*)` before and after — do not trust backup file creation as proof of DB write.
+- The actual primary key column is **`id`** (not `db_id` — CLAUDE.md schema docs below use `db_id` for historical reasons but the live table uses `id`).
+- `pipeline_2.py` reads from clipboard; if results appear parsed but nothing writes, first check: (a) old file still on server (see Deployment Constraint), (b) console for `❌` lines with full traceback.
+- Confirm the exact JSON format/path **before** writing any field-mapping code to avoid rewrites.
+
+
 
 AI Agent 預算審核平台 (AI Agent Budget Review Platform) — an internal web system for ASE Smart System Department to manage and review AI Agent project budgets through a two-layer approval mechanism: AI auto-review (Layer 1) followed by expert manual review (Layer 2).
 
@@ -22,7 +57,7 @@ AI Agent 預算審核平台 (AI Agent Budget Review Platform) — an internal we
 
 **budget.budget_requests** — core table
 ```
-db_id          SERIAL PK
+id             SERIAL PK        -- NOTE: docs previously said db_id; live table uses id
 project_name   VARCHAR UNIQUE
 week           INT                  -- ISO week number, auto-calculated on insert
 category       VARCHAR
@@ -46,7 +81,7 @@ updated_at     TIMESTAMP
 **budget.audit_logs**
 ```
 log_id      INT PK
-request_id  INT FK → budget_requests.db_id
+request_id  INT FK → budget_requests.id
 action      VARCHAR
 operator    VARCHAR
 timestamp   DATETIME
@@ -139,11 +174,11 @@ Field mapping to DB:
 - `week` → computed from `datetime.now().isocalendar()` as plain INT (e.g. 21)
 - `status` → initial value `AI_REVIEW`
 
-INSERT must use `ON CONFLICT (project_name) DO UPDATE` and `RETURNING db_id`.
+INSERT must use `ON CONFLICT (project_name) DO UPDATE` and `RETURNING id`.
 
 ## Workflow Rules
 
-1. On JSON ingest: `db_id` auto-generated; `budget_no` and `dispatch_date` remain NULL.
+1. On JSON ingest: `id` auto-generated; `budget_no` and `dispatch_date` remain NULL.
 2. AI fields (`ai_comment`, `ai_result`) are **read-only** in the frontend — never allow user edits.
 3. Expert lock: only one expert may hold write access to a `budget_requests` row at a time (concurrency guard required).
 4. On expert approval (`expert_decision = '通過'`): set `sign_date = NOW()`, compute `cycle_time`, set `status = CLOSED`.

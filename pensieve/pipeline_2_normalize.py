@@ -1,10 +1,11 @@
 """
-Pipeline Step 2 — 從剪貼簿讀取線上 AI 審核結果並寫入資料庫
+Pipeline Step 2 (normalize) — 與 pipeline_2.py 相同，但存入 DB 前會將
+「原因」欄位的所有換行（\\n）替換成空白，確保 ai_comment 是單行連續文字。
 ══════════════════════════════════════════════════════════════
 流程：
   pipeline_1 → 分類 + 全文 複製至剪貼簿
   使用者貼至線上 AI 審核 → AI 輸出（分類欄位原樣帶回 + 審核結果）→ 複製至剪貼簿
-  本腳本讀取剪貼簿 → 直接寫入 DB
+  本腳本讀取剪貼簿 → 直接寫入 DB（原因欄位先去除 \\n）
 
 剪貼簿輸入格式（線上 AI 輸出，JSON 陣列；判定系統/判定類別/負責專家
 由 AI 從輸入原樣帶回，不需再合併 system_defined.json）：
@@ -214,7 +215,7 @@ def _write_db(merged: list):
         category     = item.get("判定類別") or None
         sub_category = item.get("判定系統") or None
         expert_name  = item.get("負責專家") or None
-        ai_comment   = (item.get("原因") or "").strip()
+        ai_comment   = re.sub(r"\s*\n\s*", " ", (item.get("原因") or "")).strip()
         ai_result_dict = {
             "AI處置結果":        item.get("最終決策"),
             "保留案件的信心分數": item.get("AI對於保留案件的信心分數"),

@@ -43,6 +43,7 @@ ENTITY_MAPPING = {
     "資安":    ["SCADA", "PLC", "自動化監測", "中控系統", "CCTV", "MOF電錶", "資訊安全", "資安", "網路安全", "防火牆", "弱點掃描", "滲透測試", "入侵偵測", "EDR", "SIEM", "ISO27001", "存取控制", "資安監控", "SOC"],
     "AI自動化":["影像辨識模型", "深度學習", "AI演算法"],
     "抽氣":    ["RRTO", "RTO", "沸石滾輪", "Scrubber", "洗滌塔", "有機排氣", "無機排氣", "排氣管路", "風車", "異味改善", "抽氣馬達"],
+    "環保":    ["廢棄物", "廢液", "環保法", "環保局", "環評", "ISO14001", "碳排", "溫室氣體", "環境評估", "廢氣排放", "環保稽查", "CSR", "ESG環境", "有害廢棄物", "環境影響評估"],
     "建管":    ["建置案", "餐廳建置", "老舊建物改善", "園管區", "結構安全", "防水工程"],
     "Relayout":["機台移位", "空間規劃", "隔間拆除", "裝修", "家具配置", "佈局調整"],
 }
@@ -67,13 +68,13 @@ LLM_RETRIES    = 2                       # LLM 回答無效時的重試次數
 LLM_FALLBACK_SYSTEM = "Relayout"
 
 LLM_WHITELIST = ["水務", "空壓", "空調", "電力", "安全", "消防", "資安",
-                 "AI自動化", "抽氣", "Relayout", "二次配", "建管"]
+                 "AI自動化", "抽氣", "環保", "Relayout", "二次配", "建管"]
 
 EXPERT_DB = {
     "設備擴充 (UTI)": {"空調": ["黃金燦"], "空壓": ["郭于斌"], "水務": ["梁益齊"], "抽氣": ["梁益齊"], "電力": ["李明鴻"], "資安": ["王嘉漢"]},
     "工程擴廠 (新工)": {"Relayout": ["陳信舟", "鄭仁勝", "紀志忠"], "二次配": ["陳信舟", "鄭仁勝", "紀志忠"], "空調": ["鄭仁勝"], "水務": ["陳妍方"], "抽氣": ["陳妍方"]},
     "CIM相關":  {"資安": ["王嘉漢"], "AI自動化": ["黃互慶"]},
-    "法遵 (ESH)": {"消防": ["吳明華"], "建管": ["吳明華"], "環保": ["姜婷毓"]},
+    "法遵 (ESH)": {"消防": ["吳明華"], "建管": ["吳明華"], "環保": ["姜婷毓"], "安全": ["楊小惠"]},
 }
 
 BOILERPLATE_NOISE = [
@@ -328,8 +329,8 @@ def classify_category(system, folder_and_header):
     # CIM 相關：資安（含原監控）/ AI自動化
     if system in ("AI自動化", "資安"):
         return "CIM相關"
-    # 法遵 (ESH)：消防 / 建管 / 安全
-    if system in ("消防", "建管", "安全"):
+    # 法遵 (ESH)：消防 / 建管 / 安全 / 環保
+    if system in ("消防", "建管", "安全", "環保"):
         return "法遵 (ESH)"
     # 工程擴廠 (新工)：二次配 / Relayout 一律歸新工
     if system in ("二次配", "Relayout"):
@@ -411,12 +412,52 @@ def process():
 
     print(f"\n✅ 完成：共 {len(all_cases)} 筆全部判定完成"
           f"（規則 {rule_count} 筆 / LLM {len(rule_unknown)} 筆），無未知系統")
-    print("   → 直接執行 pipeline_2.py（本地審核並寫入 DB）")
+
+    # ── 複製結果到剪貼簿（供 RPA 取走送至線上 AI 審核）───────────────────
+    _copy_to_clipboard(all_cases)
+    print("   → 結果已複製至剪貼簿，請啟動 RPA 並貼上後送至線上 AI 審核")
 
 
 def _save(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def _copy_to_clipboard(cases: list):
+    """
+    將分類結果複製至剪貼簿（JSON 格式），供 RPA 取走送至線上 AI 審核。
+    格式：JSON 陣列，每筆含 案件名稱/判定系統/判定類別/負責專家/檔案實體清單/所有檔案原文。
+    優先使用 pyperclip；失敗則嘗試 win32clipboard；皆無則存至 clipboard_output.txt。
+    """
+    text = json.dumps(cases, indent=2, ensure_ascii=False)
+    saved = False
+
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        print(f"📋 已複製 {len(cases)} 筆至剪貼簿（pyperclip）")
+        saved = True
+    except Exception:
+        pass
+
+    if not saved:
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+            win32clipboard.CloseClipboard()
+            print(f"📋 已複製 {len(cases)} 筆至剪貼簿（win32clipboard）")
+            saved = True
+        except Exception:
+            pass
+
+    if not saved:
+        fallback = os.path.join(WORK_DIR, "clipboard_output.txt")
+        with open(fallback, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"⚠️  剪貼簿寫入失敗，結果已存至：{fallback}")
+        print("   （請手動複製該檔案內容送至線上 AI）")
 
 
 if __name__ == "__main__":

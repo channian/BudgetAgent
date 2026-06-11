@@ -1,10 +1,18 @@
 /* Budget submission / edit page */
 
+function fmtFileSize(bytes) {
+  if (!bytes) return "—";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+}
+
 function EditPage({ budget, onBack, onSave, currentUser }) {
   const isNew = !budget;
 
   const [form, setForm] = React.useState(() => ({
     project:       budget?.project       || "",
+    budgetNo:      budget?.budgetNo      || "",
     category:      budget?.category      || "",
     subCategory:   budget?.subCategory   || "",
     expertName:    budget?.expertName    || "",
@@ -19,6 +27,45 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
   }));
   const [jsonText, setJsonText] = React.useState("");
   const [jsonErr, setJsonErr]   = React.useState("");
+
+  // Attachments
+  const [pendingFiles,  setPendingFiles]  = React.useState([]); // queued for upload after save (new budget)
+  const [attachments,   setAttachments]   = React.useState([]); // existing attachments (edit mode)
+  const [attUploading,  setAttUploading]  = React.useState(false);
+  const fileInputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!isNew && budget?.dbId) {
+      API.fetchAttachments(budget.dbId)
+        .then(list => setAttachments(list))
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    if (isNew) {
+      setPendingFiles(prev => [...prev, file]);
+    } else {
+      setAttUploading(true);
+      API.uploadAttachment(budget.dbId, file)
+        .then(att => setAttachments(prev => [...prev, att]))
+        .catch(err => alert("上傳失敗：" + err.message))
+        .finally(() => setAttUploading(false));
+    }
+  };
+
+  const removePending = (idx) => setPendingFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const handleDeleteAtt = async (att) => {
+    if (!confirm(`確定刪除附件「${att.original_name}」？`)) return;
+    try {
+      await API.deleteAttachment(att.id);
+      setAttachments(prev => prev.filter(a => a.id !== att.id));
+    } catch (err) { alert("刪除失敗：" + err.message); }
+  };
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -50,10 +97,9 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
 
   const dispatchDate = budget?.dispatchDate || new Date();
   const week = MOCK.weekOf(dispatchDate);
-  const budgetNo = budget?.id || MOCK.nextDispatchNo([]);
   const cyc = budget?.signDate ? MOCK.cycleTime(dispatchDate, budget.signDate) : null;
 
-  const canSave = form.project && form.category && form.owner && form.amount;
+  const canSave = form.project && form.owner && form.amount;
 
   return (
     <>
@@ -69,7 +115,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
         </div>
         <div className="actions">
           <button className="btn ghost" onClick={onBack}>取消</button>
-          <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form })}>
+          <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form }, pendingFiles)}>
             {isNew ? "送出申請" : "儲存變更"}
           </button>
         </div>
@@ -96,12 +142,13 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
               </div>
               <div className="field-row two" style={{ marginTop: 14 }}>
                 <div className="field">
-                  <label>類別 <span className="req">*</span></label>
+                  <label>預算單號 <span className="opt">(選填)</span></label>
                   <input
                     type="text"
-                    value={form.category}
-                    onChange={(e) => set("category", e.target.value)}
-                    placeholder="例：研發費用 / 資訊系統"
+                    value={form.budgetNo}
+                    onChange={(e) => set("budgetNo", e.target.value)}
+                    placeholder="例：2026-FA-00123"
+                    className="mono"
                   />
                 </div>
                 <div className="field">
@@ -110,7 +157,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                     type="text"
                     value={form.subCategory}
                     onChange={(e) => set("subCategory", e.target.value)}
-                    placeholder="例：ERP 採購系統"
+                    placeholder="例：空調 / 電力 / 水務…"
                   />
                 </div>
               </div>
@@ -130,7 +177,7 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                     type="text"
                     value={form.expertName}
                     onChange={(e) => set("expertName", e.target.value)}
-                    placeholder="輸入負責專家姓名（與主畫面負責專家欄位相同）"
+                    placeholder="輸入負責專家姓名"
                   />
                 </div>
               </div>
@@ -237,6 +284,57 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
               </div>
             </div>
           </div>
+          {/* Attachments */}
+          <div className="card">
+            <div className="card-head">
+              <h3>附件 <span className="tag">ATTACHMENTS</span></h3>
+              <button
+                className="btn sm"
+                disabled={attUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {attUploading ? "上傳中…" : "+ 上傳附件"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
+            </div>
+            <div className="card-body">
+              {isNew ? (
+                pendingFiles.length === 0 ? (
+                  <div className="hint">尚無附件，點擊「上傳附件」新增（儲存後自動上傳）</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {pendingFiles.map((f, i) => (
+                      <div key={i} className="flex-row" style={{ background: "var(--surface-2)", padding: "8px 12px", borderRadius: "var(--radius-sm)", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.name}>{f.name}</span>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtFileSize(f.size)}</span>
+                        <button className="btn ghost sm" style={{ padding: "2px 8px", fontSize: 11, color: "var(--bad)" }} onClick={() => removePending(i)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                attachments.length === 0 ? (
+                  <div className="hint">無附件</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {attachments.map(att => (
+                      <div key={att.id} className="flex-row" style={{ background: "var(--surface-2)", padding: "8px 12px", borderRadius: "var(--radius-sm)", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={att.original_name}>{att.original_name}</span>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtFileSize(att.file_size)}</span>
+                        <button className="btn ghost sm" style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => API.downloadAttachment(att.id, att.original_name)}>下載</button>
+                        <button className="btn ghost sm" style={{ padding: "2px 8px", fontSize: 11, color: "var(--bad)" }} onClick={() => handleDeleteAtt(att)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Side: auto-filled meta */}
@@ -244,7 +342,6 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
           <div className="card">
             <div className="card-head"><h3>自動產生 <span className="tag">AUTO</span></h3></div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <KvLine k="預算單號" v={budgetNo} mono accent/>
               <KvLine k="週數" v={`W${String(week).padStart(2, "0")} / 2026`} mono/>
               <KvLine k="派送日期" v={MOCK.fmtDate(dispatchDate)} mono/>
               <KvLine k="簽核日期" v={budget?.signDate ? MOCK.fmtDate(budget.signDate) : "送出後系統填入"} mono/>
@@ -256,7 +353,6 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
             <div className="card-head"><h3>檢核提示 <span className="tag">CHECKS</span></h3></div>
             <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <CheckRow ok={!!form.project} label="已填寫項目名稱"/>
-              <CheckRow ok={!!form.category} label="已填寫類別"/>
               <CheckRow ok={!!form.amount && Number(form.amount) > 0} label="金額有效"/>
               <CheckRow ok={!!form.owner} label="已填寫預算負責人"/>
               <CheckRow ok={!!form.aiResult} label="AI 初審結果已套用 (選填)" warn/>

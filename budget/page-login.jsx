@@ -26,10 +26,10 @@ function LoginPage({ onLogin }) {
     <div className="login-shell">
       <form className="login-card" onSubmit={submit}>
         <div className="login-brand">
-          <div className="mark">p</div>
+          <div className="mark">預</div>
           <div>
-            <div className="name">pensieve</div>
-            <div className="tag">AI 預算審核平台 · 2026</div>
+            <div className="name">預算AI審核平台</div>
+            <div className="tag">AI Budget Review Platform · 2026</div>
           </div>
         </div>
 

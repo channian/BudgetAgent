@@ -4,6 +4,7 @@ function App() {
   const [user, setUser]               = React.useState(null);
   const [authChecked, setAuthChecked] = React.useState(false);
   const [route, setRoute]             = React.useState("pending");
+  const [fromRoute, setFromRoute]     = React.useState("pending");
   const [budgets, setBudgets]         = React.useState([]);
   const [loading, setLoading]         = React.useState(false);
   const [apiError, setApiError]       = React.useState(null);
@@ -104,7 +105,7 @@ function App() {
 
   // Load budgets whenever user or list route changes
   const loadBudgets = React.useCallback(async (targetScope) => {
-    const scope = targetScope || (route === "approved" ? "completed" : "pending");
+    const scope = targetScope || "pending";
     setLoading(true);
     setApiError(null);
     try {
@@ -119,41 +120,57 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [route]);
+  }, []);
 
   React.useEffect(() => {
-    if (user && (route === "pending" || route === "approved")) {
+    if (user && (route === "pending" || route === "approved" || route === "expert_review")) {
       loadBudgets(route === "approved" ? "completed" : "pending");
     }
   }, [user, route]);
 
-  const pendingCount = budgets.filter(
-    b => b.status === "AI_REVIEW" || b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION"
+  // Badge counts
+  const hasComment = (b) => !!(b.expertComment && b.expertComment.trim());
+  // 待簽核 = only dispatched cases with expert comment ready for admin to sign
+  const pendingCount = budgets.filter(b =>
+    (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && hasComment(b)
+  ).length;
+  // 待專家審核 = dispatched cases without expert comment yet
+  const expertReviewCount = budgets.filter(b =>
+    (b.status === "EXPERT_REVIEW" || b.status === "PENDING_ACTION") && !hasComment(b)
   ).length;
 
-  const openDetail = (b) => { setCurrentBudget(b); setRoute("detail"); };
-  const goNew      = ()  => { setCurrentBudget(null); setRoute("new"); };
+  const openDetail = (b, source) => {
+    setCurrentBudget(b);
+    setFromRoute(source || route);
+    setRoute("detail");
+  };
+  const goNew      = ()  => { setCurrentBudget(null); setFromRoute(route); setRoute("new"); };
   const goEdit     = (b) => { setCurrentBudget(b); setRoute("edit"); };
-  const goList     = ()  => setRoute("pending");
+  const goList     = ()  => {
+    if (fromRoute === "expert_review") setRoute("expert_review");
+    else if (fromRoute === "data_import") setRoute("data_import");
+    else if (fromRoute === "approved") setRoute("approved");
+    else setRoute("pending");
+  };
 
   const approve = async (b, comment) => {
     try {
       await API.approve(b.dbId, comment);
-      setRoute("pending");
+      goList();
     } catch (e) { setApiError(e.message); }
   };
 
   const reject = async (b, comment, final = false) => {
     try {
       await API.reject(b.dbId, comment, final);
-      setRoute("pending");
+      goList();
     } catch (e) { setApiError(e.message); }
   };
 
   const returnForSupplement = async (b, comment) => {
     try {
       await API.reject(b.dbId, comment, false);
-      setRoute("pending");
+      goList();
     } catch (e) { setApiError(e.message); }
   };
 
@@ -165,11 +182,6 @@ function App() {
     } catch (e) { setApiError(e.message); }
   };
 
-  const inlineApprove = async (b, comment = "") => {
-    await API.approve(b.dbId, comment);
-  };
-
-  // Boss/admin sign-off: finalise per the expert's recommendation
   const inlineSign = async (b) => {
     if (b.expertResult === "reject") await API.reject(b.dbId, "", true);
     else                             await API.approve(b.dbId, "");
@@ -182,14 +194,21 @@ function App() {
     } catch (e) { setApiError(e.message); }
   };
 
-  const saveNew = async (form) => {
+  const saveNew = async (form, pendingFiles = []) => {
     try {
+      let budgetId = currentBudget?.dbId;
       if (currentBudget) {
         await API.updateBudget(currentBudget.dbId, form);
       } else {
-        await API.createBudget(form);
+        const result = await API.createBudget(form);
+        budgetId = result?.id;
       }
-      setRoute("pending");
+      if (budgetId && pendingFiles.length > 0) {
+        for (const f of pendingFiles) {
+          await API.uploadAttachment(budgetId, f).catch(e => console.error("附件上傳失敗：", e));
+        }
+      }
+      setRoute(fromRoute === "data_import" ? "data_import" : "pending");
     } catch (e) { setApiError(e.message); }
   };
 
@@ -205,26 +224,32 @@ function App() {
   let body   = null;
 
   if (route === "pending") {
-    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} onSign={inlineSign} />;
+    body   = <ListPage scope="pending" budgets={budgets} loading={loading} onRow={(b) => openDetail(b, "pending")} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} onSign={async (b) => { await inlineSign(b); loadBudgets("pending"); }} />;
     crumbs = ["待簽核"];
+  } else if (route === "expert_review") {
+    body   = <ListPage scope="expert_review" budgets={budgets} loading={loading} onRow={(b) => openDetail(b, "expert_review")} onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} />;
+    crumbs = ["待專家審核"];
   } else if (route === "approved") {
-    body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={openDetail} onNew={goNew} onRefresh={() => loadBudgets("completed")} currentUser={user} />;
+    body   = <ListPage scope="approved" budgets={budgets} loading={loading} onRow={(b) => openDetail(b, "approved")} onNew={goNew} onRefresh={() => loadBudgets("completed")} currentUser={user} />;
     crumbs = ["已簽核完成"];
   } else if (route === "library") {
     body   = <LibraryPage currentUser={user} />;
     crumbs = ["AI Agent 圖書館"];
+  } else if (route === "data_import") {
+    body   = <DataImportPage onNew={goNew} onRefresh={() => loadBudgets("pending")} currentUser={user} />;
+    crumbs = ["前端資料導入"];
   } else if (route === "assignment") {
-    body   = <AssignmentPage />;
+    body   = <AssignmentPage currentUser={user} />;
     crumbs = ["派發中心人員設定"];
   } else if (route === "permissions") {
-    body   = <PermissionsPage />;
+    body   = <PermissionsPage currentUser={user} />;
     crumbs = ["權限管理中心"];
   } else if (route === "activity") {
     body   = <ActivityPage />;
     crumbs = ["使用狀況"];
   } else if (route === "detail" && currentBudget) {
-    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onDelete={deleteBudget} onEdit={goEdit} currentUser={user} />;
-    crumbs = ["待簽核", currentBudget.id];
+    body   = <DetailPage budget={currentBudget} onBack={goList} onApprove={approve} onReject={reject} onReturn={returnForSupplement} onSaveReview={saveReview} onDelete={deleteBudget} onEdit={goEdit} currentUser={user} fromRoute={fromRoute} />;
+    crumbs = [fromRoute === "expert_review" ? "待專家審核" : fromRoute === "approved" ? "已簽核完成" : "待簽核", currentBudget.id];
   } else if (route === "edit" && currentBudget) {
     body   = <EditPage budget={currentBudget} onBack={() => setRoute("detail")} onSave={saveNew} currentUser={user} />;
     crumbs = ["待簽核", currentBudget.id, "編輯"];
@@ -236,7 +261,7 @@ function App() {
   return (
     <>
       <div className="app">
-        <Sidebar route={route} setRoute={(r) => setRoute(r)} pendingCount={pendingCount} width={sidebarW} onResize={setSidebarW} user={user} collapsed={collapsed} onToggleCollapse={() => setCollapsed(c => !c)} />
+        <Sidebar route={route} setRoute={(r) => setRoute(r)} pendingCount={pendingCount} expertReviewCount={expertReviewCount} fromRoute={fromRoute} width={sidebarW} onResize={setSidebarW} user={user} collapsed={collapsed} onToggleCollapse={() => setCollapsed(c => !c)} />
         <div className="col-right">
           <Topbar crumbs={crumbs} notifs={notifs} onMarkRead={markNotifRead} onMarkAllRead={markAllRead} />
           {apiError && (
@@ -245,7 +270,7 @@ function App() {
               <button onClick={() => setApiError(null)} style={{ marginLeft: 12, background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 600 }}>✕</button>
             </div>
           )}
-          <main className={`main ${(route === "pending" || route === "approved") ? "fit" : ""}`}>{body}</main>
+          <main className={`main ${(route === "pending" || route === "expert_review") ? "fit" : ""}`}>{body}</main>
         </div>
       </div>
 

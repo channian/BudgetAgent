@@ -117,8 +117,9 @@ function mapAiJsonPaste(j) {
 // ── DB row → frontend object ──────────────────────────────────────────
 function dbToFrontend(row) {
   const ai           = parseAiResult(row.ai_result);
-  const expertResult = row.expert_decision === "通過" ? "approve"
-                     : row.expert_decision === "退件" ? "reject" : null;
+  const _ed = row.expert_decision || "";
+  const expertResult = ["通過", "核可", "approve", "Approve", "APPROVE"].includes(_ed) ? "approve"
+                     : ["退件", "reject", "Reject", "REJECT"].includes(_ed) ? "reject" : null;
   const ownerName    = row.owner || "";   // plain text column
 
   return {
@@ -141,7 +142,8 @@ function dbToFrontend(row) {
     status:        row.status,
     dispatchDate:  row.dispatch_date ? new Date(row.dispatch_date) : new Date(),
     signDate:      row.sign_date ? new Date(row.sign_date) : null,
-    cycleTime:     row.cycle_time,
+    cycleTime:        row.cycle_time,
+    frontendSubmitted: !!row.frontend_submitted,
     notes:         row.note || "",
     updatedAt:     row.dispatch_date ? new Date(row.dispatch_date) : null,
   };
@@ -162,10 +164,11 @@ function frontendToDB(form) {
 
   return {
     project_name: form.project,
-    category:     form.category || null,     // free text
+    budget_no:    form.budgetNo   || null,
+    category:     form.category   || null,
     sub_category: form.subCategory || null,
     expert_name:  form.expertName  || null,
-    owner:        form.owner || null,        // free text
+    owner:        form.owner || null,
     amount:       parseFloat(String(form.amount || 0).replace(/,/g, "").replace(/NT\$/g, "").trim()) || 0,
     ai_comment:   form.aiReason || null,
     ai_result_obj,
@@ -202,12 +205,6 @@ async function apiMe() {
   const d = await apiFetch("/api/auth/me");
   return d.user;
 }
-async function apiChangeMyPassword(newPassword) {
-  await apiFetch("/api/auth/me/password", {
-    method: "PUT",
-    body: JSON.stringify({ password: newPassword }),
-  });
-}
 
 // ── Budgets ───────────────────────────────────────────────────────────
 async function apiFetchBudgets(scope = "pending", filters = {}) {
@@ -234,6 +231,10 @@ async function apiRejectBudget(dbId, comment, final = false) {
   const d = await apiFetch(`/api/budgets/${dbId}/reject`, { method: "POST", body: JSON.stringify({ comment, final }) });
   return dbToFrontend(d.budget);
 }
+async function apiReassign(dbId, data) {
+  const d = await apiFetch(`/api/budgets/${dbId}/reassign`, { method: "POST", body: JSON.stringify(data) });
+  return d;
+}
 async function apiDeleteBudget(dbId, reason) {
   await apiFetch(`/api/budgets/${dbId}`, { method: "DELETE", body: JSON.stringify({ reason }) });
 }
@@ -245,6 +246,13 @@ async function apiSaveReview(dbId, { comment, decision }) {
   const d = await apiFetch(`/api/budgets/${dbId}/review`, {
     method: "POST",
     body: JSON.stringify({ comment, decision }),
+  });
+  return dbToFrontend(d.budget);
+}
+async function apiSaveBudgetNo(dbId, budgetNo) {
+  const d = await apiFetch(`/api/budgets/${dbId}`, {
+    method: "PUT",
+    body: JSON.stringify({ budget_no: budgetNo || null }),
   });
   return dbToFrontend(d.budget);
 }
@@ -274,6 +282,9 @@ async function apiAcquireLock(dbId) {
 async function apiReleaseLock(dbId) {
   return apiFetch(`/api/budgets/${dbId}/lock`, { method: "DELETE" });
 }
+async function apiConfirmFrontend(dbId) {
+  return apiFetch(`/api/budgets/${dbId}/confirm-frontend`, { method: "POST" });
+}
 
 // ── Users ─────────────────────────────────────────────────────────────
 async function apiFetchUsers() {
@@ -288,8 +299,8 @@ async function apiUpdateUser(id, form) {
   const d = await apiFetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(form) });
   return d.user;
 }
-async function apiResetPassword(id, password) {
-  await apiFetch(`/api/users/${id}/password`, { method: "PUT", body: JSON.stringify({ password }) });
+async function apiDeleteUser(id) {
+  await apiFetch(`/api/users/${id}`, { method: "DELETE" });
 }
 
 // ── Export / Import ───────────────────────────────────────────────────
@@ -313,18 +324,118 @@ async function apiExportBudgets(scope = "pending", format = "csv") {
   URL.revokeObjectURL(url);
 }
 
-// Uploads a CSV/XLSX file; returns { inserted, skipped, errors }
-async function apiImportBudgets(file) {
+// Probe an xlsx/csv file for sheet names; returns { sheets: [...] }
+async function apiGetImportSheets(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${API_BASE}/api/budgets/import`, {
+  const res = await fetch(`${API_BASE}/api/budgets/import/sheets`, {
     method: "POST",
     credentials: "include",
-    body: fd,   // let the browser set multipart boundary
+    body: fd,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body; // { sheets: ["Sheet1", ...] }
+}
+
+// Uploads a CSV/XLSX file; returns { inserted, skipped, errors }
+// options: { sheet?: string, mode?: "pending"|"completed" }
+async function apiImportBudgets(file, options = {}) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const params = new URLSearchParams();
+  if (options.sheet && options.sheet !== "(單一工作表)") params.set("sheet", options.sheet);
+  if (options.mode)  params.set("mode", options.mode);
+  const qs  = params.toString();
+  const res = await fetch(`${API_BASE}/api/budgets/import${qs ? "?" + qs : ""}`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
+}
+
+// Friendly Chinese labels for the completed-import diagnostic fields
+const IMPORT_FIELD_LABELS = {
+  project_name: "Project Name", week: "週數(w)", category: "類別(自動推導)",
+  sub_category: "系統(Excel 類別)", expert_name: "Owner→負責專家", budget_no: "BudgetNo.",
+  owner: "預算負責人", amount: "金額", expert_comment: "專家評論",
+  expert_decision: "審核處置", dispatch_date: "派送日期", sign_date: "簽核日期",
+  cycle_time: "Cycle time", note: "備註",
+};
+
+// Build a { ok, text, errors[], detail[] } banner object from an import result
+function formatImportResult(result) {
+  const total    = result.total_rows      ?? 0;
+  const created  = result.created         ?? result.inserted ?? 0;
+  const updated  = result.updated         ?? 0;
+  const skip     = result.skipped         ?? 0;
+  const cycles   = result.cycles_kept     ?? 0;
+  const derived  = result.derived_category ?? 0;
+  const errs     = result.errors          ?? [];
+  const detected = result.detected_columns ?? {};
+  // category is derived, not read from Excel → not a real "missing" warning
+  const unmatched = (result.unmatched_fields ?? []).filter(f => f !== "category");
+
+  let text = `匯入完成：Excel 共 ${total} 列 → 新建 ${created} 筆、更新 ${updated} 筆`;
+  const bits = [];
+  if (skip)    bits.push(`略過空白 ${skip} 列`);
+  if (cycles)  bits.push(`同名不同派送日期 ${cycles} 筆已保留為獨立重審案`);
+  if (derived) bits.push(`自動補類別 ${derived} 筆`);
+  if (errs.length) bits.push(`錯誤 ${errs.length} 列`);
+  if (bits.length) text += "；" + bits.join("、");
+
+  const detail = [];
+  if (Object.keys(detected).length) {
+    detail.push("欄位對應：" + Object.entries(detected)
+      .map(([f, h]) => `${IMPORT_FIELD_LABELS[f] || f}←「${h}」`).join("　"));
+  }
+  if (unmatched.length) {
+    detail.push("⚠ 未對應欄位：" + unmatched.map(f => IMPORT_FIELD_LABELS[f] || f).join("、")
+      + "（Excel 標題沒比對上，該欄資料不會匯入）");
+  }
+  return { ok: errs.length === 0 && unmatched.length === 0, text, errors: errs, detail };
+}
+
+// ── Attachments ───────────────────────────────────────────────────────
+async function apiUploadAttachment(budgetId, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${API_BASE}/api/budgets/${budgetId}/attachments`, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body.attachment;
+}
+async function apiFetchAttachments(budgetId) {
+  const d = await apiFetch(`/api/budgets/${budgetId}/attachments`);
+  return d.attachments || [];
+}
+async function apiDownloadAttachment(attId, originalName) {
+  const res = await fetch(`${API_BASE}/api/attachments/${attId}/download`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)/i);
+  const fname = m ? decodeURIComponent(m[1].trim()) : (originalName || `attachment_${attId}`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+async function apiDeleteAttachment(attId) {
+  await apiFetch(`/api/attachments/${attId}`, { method: "DELETE" });
 }
 
 // ── AI Library (RAG systems + entries) ───────────────────────────────
@@ -343,6 +454,10 @@ async function apiUpdateRagSystem(id, form) {
 async function apiDeleteRagSystem(id) {
   await apiFetch(`/api/rag/systems/${id}`, { method: "DELETE" });
 }
+async function apiReseedRagSystems() {
+  const d = await apiFetch("/api/rag/systems/reseed", { method: "POST" });
+  return d;
+}
 async function apiFetchRagEntries(sysId, filters = {}) {
   const clean = {};
   Object.entries(filters).forEach(([k, v]) => { if (v) clean[k] = v; });
@@ -351,11 +466,13 @@ async function apiFetchRagEntries(sysId, filters = {}) {
   return d.entries || [];
 }
 async function apiCreateRagEntry(sysId, form) {
-  const d = await apiFetch(`/api/rag/systems/${sysId}/entries`, { method: "POST", body: JSON.stringify(form) });
+  const payload = { ...form, entry_category: form.entry_category || "其他" };
+  const d = await apiFetch(`/api/rag/systems/${sysId}/entries`, { method: "POST", body: JSON.stringify(payload) });
   return d.entry;
 }
 async function apiUpdateRagEntry(entryId, form) {
-  const d = await apiFetch(`/api/rag/entries/${entryId}`, { method: "PUT", body: JSON.stringify(form) });
+  const payload = { ...form, entry_category: form.entry_category || "其他" };
+  const d = await apiFetch(`/api/rag/entries/${entryId}`, { method: "PUT", body: JSON.stringify(payload) });
   return d.entry;
 }
 async function apiDeleteRagEntry(entryId) {
@@ -385,7 +502,6 @@ window.API = {
   login:               apiLogin,
   logout:              apiLogout,
   me:                  apiMe,
-  changeMyPassword:    apiChangeMyPassword,
   fetchBudgets:        apiFetchBudgets,
   fetchBudget:         apiFetchBudget,
   createBudget:        apiCreateBudget,
@@ -395,26 +511,37 @@ window.API = {
   deleteBudget:        apiDeleteBudget,
   resubmit:            apiResubmitBudget,
   saveReview:          apiSaveReview,
+  saveBudgetNo:        apiSaveBudgetNo,
   dispatch:            apiDispatchBudget,
+  reassign:            apiReassign,
   fetchTimeline:       apiFetchTimeline,
   batchSign:           apiBatchSign,
   acquireLock:         apiAcquireLock,
   releaseLock:         apiReleaseLock,
+  confirmFrontend:     apiConfirmFrontend,
   fetchUsers:          apiFetchUsers,
   createUser:          apiCreateUser,
   updateUser:          apiUpdateUser,
-  resetPassword:       apiResetPassword,
+  deleteUser:          apiDeleteUser,
   exportBudgets:       apiExportBudgets,
+  getImportSheets:     apiGetImportSheets,
   importBudgets:       apiImportBudgets,
+  formatImportResult,
   fetchNotifications:  apiFetchNotifications,
   markRead:            apiMarkNotificationRead,
   lookupEmployee:      apiLookupEmployee,
   fetchLoginStats:     apiFetchLoginStats,
+  // Attachments
+  uploadAttachment:    apiUploadAttachment,
+  fetchAttachments:    apiFetchAttachments,
+  downloadAttachment:  apiDownloadAttachment,
+  deleteAttachment:    apiDeleteAttachment,
   // AI Library
   fetchRagSystems:     apiFetchRagSystems,
   createRagSystem:     apiCreateRagSystem,
   updateRagSystem:     apiUpdateRagSystem,
   deleteRagSystem:     apiDeleteRagSystem,
+  reseedRagSystems:    apiReseedRagSystems,
   fetchRagEntries:     apiFetchRagEntries,
   createRagEntry:      apiCreateRagEntry,
   updateRagEntry:      apiUpdateRagEntry,

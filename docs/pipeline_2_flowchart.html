@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline 完整流程圖 (P1 → 線上AI → P2 → DB)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #faf7f2;
+    font-family: "Noto Sans TC", "PingFang TC", sans-serif;
+    color: #333;
+  }
+  h1 { font-size: 1.4rem; color: #7c3aed; margin-bottom: 4px; }
+  p.subtitle { font-size: 0.9rem; color: #888; margin-bottom: 24px; }
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 32px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    overflow-x: auto;
+    margin-bottom: 24px;
+  }
+  h2 { font-size: 1rem; color: #7c3aed; margin-top: 0; }
+  table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
+  th { background: #f8f4ff; padding: 8px; border: 1px solid #e2d8f4; text-align: left; }
+  td { padding: 8px; border: 1px solid #e2d8f4; }
+  code { background: #f1f5f9; border-radius: 3px; padding: 1px 5px; font-size: 0.82rem; }
+  .badge { border-radius: 4px; padding: 2px 8px; font-size: 0.82rem; display: inline-block; }
+</style>
+</head>
+<body>
+<h1>Pipeline 完整流程 — P1 → 線上 AI → P2 → DB</h1>
+<p class="subtitle">pipeline_1.py → 複製貼上 → 線上 AI 審核 → 複製貼上 → pipeline_2.py → PostgreSQL</p>
+
+<div class="card">
+<div class="mermaid">
+flowchart TD
+
+  %% ══════════════════════════════════
+  %%  PHASE 0 — 輸入來源
+  %% ══════════════════════════════════
+  SRC([📁 網路資料夾\n每個子資料夾 = 一個案件\n.pdf / .pptx / .docx\n.xlsx / .xlsm / .txt])
+
+  %% ══════════════════════════════════
+  %%  PHASE 1 — Pipeline 1
+  %% ══════════════════════════════════
+  P1_RUN([▶ 執行 pipeline_1.py])
+
+  P1_READ[讀取文件\n提取全文]
+  P1_RULE{關鍵字規則\n判定系統}
+  P1_RULE_OK[規則命中\n→ 判定系統]
+  P1_LLM[本地 LLM\nOllama / Qwen 2.5 7b\n判定系統]
+  P1_LLM_OK[LLM 判定\n重試→模糊→兜底 Relayout\n保證零未知]
+
+  P1_CAT[classify_category\n判定類別]
+  P1_EXP[EXPERT_DB\n分配負責專家]
+
+  P1_SAVE[💾 儲存\nsystem_defined.json\npytollm_output.json]
+
+  P1_CLIP{複製到剪貼簿}
+  P1_CLIP_OK([📋 剪貼簿\nJSON 陣列\n含案件名稱+分類+全文])
+  P1_CLIP_FILE([⚠️ 剪貼簿失敗\n存成 clipboard_output.txt\n需手動複製])
+
+  %% ══════════════════════════════════
+  %%  PHASE 2 — 使用者 / RPA → 線上 AI
+  %% ══════════════════════════════════
+  U_PASTE([👤 使用者 / RPA\nCtrl+V 貼到線上 AI\n如 ChatGPT / Claude])
+
+  AI_REVIEW[🌐 線上 AI 審核\n依 audit_prompt.md 規則\n判定每個案件]
+
+  AI_OUT([📄 線上 AI 輸出 JSON\n案件名稱 / 判定系統 / 判定類別 / 負責專家\n最終決策 / 信心分數 / 原因\n（分類欄位由 AI 原樣帶回）])
+
+  U_COPY([👤 使用者\nCtrl+C 複製 AI 輸出])
+
+  %% ══════════════════════════════════
+  %%  PHASE 3 — Pipeline 2
+  %% ══════════════════════════════════
+  P2_RUN([▶ 執行 pipeline_2.py])
+
+  P2_CB[讀取剪貼簿\npyperclip → win32clipboard]
+  P2_CB_EMPTY{剪貼簿\n為空?}
+  P2_CB_FAIL([❌ 錯誤：剪貼簿為空\n請先複製 AI 輸出])
+
+  P2_PARSE{解析 JSON\n4 層 fallback}
+  P2_PARSE_FAIL([❌ 無法解析 JSON\n顯示前 200 字])
+
+  P2_NORM[逐筆檢查案件名稱\n（normalize 版：去除「原因」中的 \n）]
+
+  %% ══════════════════════════════════
+  %%  PHASE 4 — 寫入 DB
+  %% ══════════════════════════════════
+  DB_CONN{連線 PostgreSQL\n10.10.28.170:5432}
+  DB_FAIL([❌ 無法連線資料庫])
+
+  DB_LOOP[逐筆處理]
+
+  DB_FIND{DB 中找案件\n三階段比對}
+  DB_SIG{SHA-256 簽名\n資料相同?}
+  DB_SKIP([⏭ 略過：資料未變])
+  DB_STATUS{案件狀態}
+
+  DB_UPDATE([🔄 UPDATE\n更新 AI 欄位])
+  DB_SUPP([📎 補送 INSERT\n名稱加「補送」])
+  DB_INSERT([✅ INSERT 新增\nstatus = AI_REVIEW])
+  DB_ERR([❌ 例外：rollback + traceback])
+
+  DONE([🎉 完成\n請重新整理平台查看])
+
+  %% ══════════════════════════════════
+  %%  連線
+  %% ══════════════════════════════════
+  SRC --> P1_RUN --> P1_READ --> P1_RULE
+  P1_RULE -- 命中 --> P1_RULE_OK --> P1_CAT
+  P1_RULE -- 未知 --> P1_LLM --> P1_LLM_OK --> P1_CAT
+  P1_CAT --> P1_EXP --> P1_SAVE --> P1_CLIP
+  P1_CLIP -- 成功 --> P1_CLIP_OK
+  P1_CLIP -- 失敗 --> P1_CLIP_FILE
+
+  P1_CLIP_OK --> U_PASTE
+  P1_CLIP_FILE -.-> U_PASTE
+
+  U_PASTE --> AI_REVIEW --> AI_OUT --> U_COPY
+
+  U_COPY --> P2_RUN --> P2_CB --> P2_CB_EMPTY
+  P2_CB_EMPTY -- 是 --> P2_CB_FAIL
+  P2_CB_EMPTY -- 否 --> P2_PARSE
+  P2_PARSE -- 成功 --> P2_NORM
+  P2_PARSE -- 失敗 --> P2_PARSE_FAIL
+
+  P2_NORM --> DB_CONN
+  DB_CONN -- 成功 --> DB_LOOP
+  DB_CONN -- 失敗 --> DB_FAIL
+
+  DB_LOOP --> DB_FIND --> DB_SIG
+  DB_SIG -- 相同 --> DB_SKIP -.-> DB_LOOP
+  DB_SIG -- 不同 --> DB_STATUS
+
+  DB_STATUS -- 進行中狀態 --> DB_UPDATE -.-> DB_LOOP
+  DB_STATUS -- 已決定狀態 --> DB_SUPP -.-> DB_LOOP
+  DB_STATUS -- 全新案件 --> DB_INSERT -.-> DB_LOOP
+
+  DB_LOOP -- exception --> DB_ERR -.-> DB_LOOP
+  DB_LOOP -- 全部完成 --> DONE
+
+  %% ══════════════════════════════════
+  %%  樣式
+  %% ══════════════════════════════════
+  classDef src      fill:#fef3c7,stroke:#f59e0b,color:#78350f
+  classDef phase1   fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  classDef user     fill:#f0fdf4,stroke:#10b981,color:#064e3b
+  classDef online   fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+  classDef phase2   fill:#fce7f3,stroke:#ec4899,color:#831843
+  classDef db       fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+  classDef ok       fill:#d1fae5,stroke:#10b981,color:#065f46
+  classDef fail     fill:#fee2e2,stroke:#ef4444,color:#991b1b
+  classDef warn     fill:#fef3c7,stroke:#f59e0b,color:#92400e
+
+  class SRC src
+  class P1_RUN,P1_READ,P1_RULE,P1_RULE_OK,P1_LLM,P1_LLM_OK,P1_CAT,P1_EXP,P1_SAVE,P1_CLIP phase1
+  class P1_CLIP_OK,U_PASTE,U_COPY user
+  class AI_REVIEW,AI_OUT online
+  class P2_RUN,P2_CB,P2_CB_EMPTY,P2_PARSE,P2_NORM phase2
+  class DB_CONN,DB_LOOP,DB_FIND,DB_SIG,DB_STATUS db
+  class DB_INSERT,DB_UPDATE,DB_SUPP,DONE ok
+  class P2_CB_FAIL,P2_PARSE_FAIL,DB_FAIL,DB_ERR fail
+  class P1_CLIP_FILE,DB_SKIP warn
+</div>
+</div>
+
+<div class="card">
+  <h2>四個階段說明</h2>
+  <table>
+    <thead><tr><th>階段</th><th>腳本</th><th>輸入</th><th>輸出</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="badge" style="background:#ede9fe;border:1px solid #7c3aed;color:#4c1d95">① Pipeline 1</span></td>
+        <td><code>pipeline_1.py</code></td>
+        <td>網路資料夾（各案件文件）</td>
+        <td>分類 + 全文，結果複製到剪貼簿</td>
+      </tr>
+      <tr>
+        <td><span class="badge" style="background:#dbeafe;border:1px solid #3b82f6;color:#1e3a8a">② 線上 AI 審核</span></td>
+        <td>手動 / RPA</td>
+        <td>剪貼簿（P1 輸出：分類 + 全文）→ 貼到 ChatGPT/Claude</td>
+        <td>每案件：判定系統/判定類別/負責專家（原樣帶回）+ 最終決策 + 信心分數 + 原因</td>
+      </tr>
+      <tr>
+        <td><span class="badge" style="background:#fce7f3;border:1px solid #ec4899;color:#831843">③ 複製 AI 輸出</span></td>
+        <td>使用者 Ctrl+C</td>
+        <td>線上 AI 輸出 JSON</td>
+        <td>放入剪貼簿，供 P2 讀取</td>
+      </tr>
+      <tr>
+        <td><span class="badge" style="background:#e0f2fe;border:1px solid #0284c7;color:#0c4a6e">④ Pipeline 2</span></td>
+        <td><code>pipeline_2.py</code> / <code>pipeline_2_normalize.py</code></td>
+        <td>剪貼簿（AI 審核結果，含分類欄位）</td>
+        <td>直接寫入 PostgreSQL <code>budget.budget_requests</code>（不再讀取 system_defined.json）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 style="margin-top:20px">DB 寫入去重邏輯</h2>
+  <table>
+    <thead><tr><th>情境</th><th>動作</th></tr></thead>
+    <tbody>
+      <tr><td>DB 無此案件</td><td>✅ INSERT，status = <code>AI_REVIEW</code></td></tr>
+      <tr><td>DB 有，簽名相同（資料未變）</td><td>⏭ 略過</td></tr>
+      <tr><td>DB 有，簽名不同，狀態 = AI_REVIEW / EXPERT_REVIEW / PENDING_ACTION</td><td>🔄 UPDATE 更新 AI 欄位</td></tr>
+      <tr><td>DB 有，狀態 = CLOSED / REJECTED，重新送入</td><td>📎 補送 INSERT（名稱加「（補送）」）</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { curve: 'basis', htmlLabels: true } });
+</script>
+</body>
+</html>
