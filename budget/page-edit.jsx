@@ -121,9 +121,11 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
         </div>
         <div className="actions">
           <button className="btn ghost" onClick={onBack}>取消</button>
-          <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form }, pendingFiles)}>
-            {isNew ? "送出申請" : "儲存變更"}
-          </button>
+          {isNew && (
+            <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form }, pendingFiles)}>
+              送出申請
+            </button>
+          )}
         </div>
       </div>
 
@@ -288,6 +290,15 @@ function EditPage({ budget, onBack, onSave, currentUser }) {
                   <input type="text" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="附註訊息…"/>
                 </div>
               </div>
+              {!isNew && (
+                <div className="flex-row" style={{ marginTop: 18, gap: 8 }}>
+                  <button className="btn primary" disabled={!canSave} onClick={() => onSave({ ...form }, pendingFiles)}>
+                    儲存變更
+                  </button>
+                  <span className="spacer-x" />
+                  <span className="hint">儲存後將同步更新案件所有欄位</span>
+                </div>
+              )}
             </div>
           </div>
           {/* Attachments */}

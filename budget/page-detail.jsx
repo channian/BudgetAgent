@@ -166,7 +166,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
           </div>
         </div>
         <div className="actions">
-          {!isFinal && !isViewer && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
+          {!isFinal && !isViewer && !canReview && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
           {isAdmin && (
             <div className="more-wrap">
               <button

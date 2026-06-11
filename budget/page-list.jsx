@@ -648,16 +648,18 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     return r;
   }, [applyView, budgets, filterStart, filterEnd, filterCat, filterSys]);
 
-  // Cycle time by system (for 已簽核完成 dashboard)
+  // Cycle time by system + expert (for 已簽核完成 dashboard)
   const cycleBySystem = React.useMemo(() => {
     const map = {};
     completedView.forEach(b => {
       const sys = b.subCategory || "（未分類）";
-      if (!map[sys]) map[sys] = { total: 0, cnt: 0 };
-      if (b.cycleTime != null) { map[sys].total += Number(b.cycleTime); map[sys].cnt++; }
+      const exp = b.expertName || "（未指定）";
+      const key = `${sys} ${exp}`;
+      if (!map[key]) map[key] = { sys, exp, total: 0, cnt: 0 };
+      if (b.cycleTime != null) { map[key].total += Number(b.cycleTime); map[key].cnt++; }
     });
-    return Object.entries(map)
-      .map(([sys, d]) => ({ sys, avg: d.cnt ? Math.round(d.total / d.cnt) : null, cnt: d.cnt }))
+    return Object.values(map)
+      .map(d => ({ sys: d.sys, exp: d.exp, avg: d.cnt ? Math.round(d.total / d.cnt) : null, cnt: d.cnt }))
       .sort((a, bv) => (bv.avg ?? -1) - (a.avg ?? -1));
   }, [completedView]);
 
@@ -665,7 +667,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
     cycleBySystem
       .filter(d => d.avg != null)
       .map(d => ({
-        label: d.sys,
+        label: `${d.sys} - ${d.exp}`,
         value: d.avg,
         displayVal: `${d.avg}天 (${d.cnt}件)`,
         color: d.avg <= 1 ? "#10b981" : d.avg <= 3 ? "#f59e0b" : "#ef4444",
@@ -916,7 +918,7 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
               <div className="card-head">
                 <h3>完成件數排行</h3>
                 <div style={{ display: "flex", gap: 4 }}>
-                  {[["cat","依類別"],["sys","依系統"],["cycle","時效"]].map(([k, lbl]) => (
+                  {[["cat","依類別"],["sys","依系統"],["cycle","Cycle Time"]].map(([k, lbl]) => (
                     <button key={k} className={`btn sm ${barTab === k ? "accent" : "ghost"}`}
                             onClick={() => setBarTab(k)}
                             style={{ fontSize: 11, padding: "3px 9px" }}>{lbl}</button>
