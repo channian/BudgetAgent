@@ -224,7 +224,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
               </div>
             </div>
             <div className="card-body">
-              <div className="ai-block">
+              <div className={`ai-block${budget.aiResult === "approve" ? " approve" : ""}`}>
                 <h4>原因 / Reason</h4>
                 <div className="reason">{budget.aiReason || "—"}</div>
               </div>

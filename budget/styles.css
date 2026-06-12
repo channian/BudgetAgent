@@ -1060,6 +1060,15 @@ table.dt .owner-cell .dp { font-size: 11px; color: var(--text-muted); }
   text-transform: uppercase;
 }
 .ai-block .reason { color: var(--text); line-height: 1.65; }
+.ai-block.approve {
+  background: linear-gradient(135deg, var(--ok-soft), oklch(0.96 0.04 140));
+  border: 1px solid oklch(0.6 0.15 155 / 0.3);
+}
+.ai-block.approve::before {
+  background: var(--ok);
+  box-shadow: 0 6px 14px -6px var(--ok);
+}
+.ai-block.approve h4 { color: oklch(0.4 0.13 155); }
 .ai-meta {
   display: flex; gap: 18px; margin-top: 14px;
   padding-top: 12px;
@@ -1484,6 +1493,14 @@ table.dt .owner-cell .dp { font-size: 11px; color: var(--text-muted); }
 }
 .cell-input:focus { border-color: var(--accent); background: var(--surface); }
 .cell-input:disabled { opacity: 0.45; cursor: not-allowed; }
+select.cell-input {
+  appearance: none;
+  font-family: var(--font-ui);
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='none' stroke='%23999' stroke-width='1.5' d='M2 4l3 3 3-3'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
 
 /* misc */
 .divider-h { height: 1px; background: var(--border); margin: 10px 0; }
