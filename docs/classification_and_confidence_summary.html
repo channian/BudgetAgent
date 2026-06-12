@@ -6,80 +6,82 @@
 <title>AI 預算審核 — 判定邏輯與信心分數說明</title>
 <style>
   * { box-sizing: border-box; }
+  @page { size: A4 landscape; margin: 8mm; }
   body {
     margin: 0;
-    padding: 22px;
+    padding: 16px;
     background: #faf7f2;
     font-family: "Noto Sans TC", "PingFang TC", sans-serif;
     color: #333;
+    font-size: 12px;
   }
-  h1 { font-size: 1.5rem; color: #7c3aed; margin: 0 0 2px; }
-  p.subtitle { font-size: 0.9rem; color: #888; margin: 0 0 18px; }
-  .grid {
+  .page { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; color: #7c3aed; margin: 0 0 2px; }
+  p.subtitle { font-size: 0.78rem; color: #888; margin: 0 0 10px; }
+  .grid-top {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
   }
   .card {
     background: white;
-    border-radius: 12px;
-    padding: 20px 22px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
   }
   .card h2 {
-    font-size: 1.05rem; color: #7c3aed; margin: 0 0 10px;
-    display: flex; align-items: center; gap: 8px;
+    font-size: 0.92rem; color: #7c3aed; margin: 0 0 8px;
+    display: flex; align-items: center; gap: 6px;
   }
   .card h2 .n {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border-radius: 50%;
-    background: #ede9fe; color: #4c1d95; font-size: 0.8rem; font-weight: 700;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #ede9fe; color: #4c1d95; font-size: 0.7rem; font-weight: 700;
+    flex-shrink: 0;
   }
-  ol.steps { margin: 0; padding-left: 0; list-style: none; counter-reset: step; }
-  ol.steps > li {
-    counter-increment: step;
-    position: relative;
-    padding: 7px 0 7px 30px;
-    font-size: 0.85rem;
-    line-height: 1.45;
-    border-bottom: 1px dashed #eee;
+  /* Section 1 — flow */
+  .flow-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px;
   }
-  ol.steps > li:last-child { border-bottom: none; }
-  ol.steps > li::before {
-    content: counter(step);
-    position: absolute; left: 0; top: 6px;
-    width: 20px; height: 20px; border-radius: 50%;
-    background: #ede9fe; color: #4c1d95;
-    font-size: 0.72rem; font-weight: 700;
+  .flow-grid .step {
+    position: relative; padding: 3px 0 3px 22px;
+    font-size: 0.72rem; line-height: 1.35; color: #444;
+  }
+  .flow-grid .step::before {
+    content: attr(data-n);
+    position: absolute; left: 0; top: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #ede9fe; color: #4c1d95; font-size: 0.62rem; font-weight: 700;
     display: flex; align-items: center; justify-content: center;
   }
-  ol.steps > li b { color: #7c3aed; }
+  .flow-grid .step b { color: #7c3aed; }
   .flow-end {
-    margin-top: 10px; padding: 10px 12px;
+    margin-top: 8px; padding: 7px 10px;
     background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
-    font-size: 0.82rem; color: #065f46; line-height: 1.5;
+    font-size: 0.72rem; color: #065f46; line-height: 1.45;
   }
-  .note {
-    margin-top: 12px; padding: 10px 12px;
-    background: #fef9ec; border: 1px solid #fde9c8; border-radius: 8px;
-    font-size: 0.8rem; color: #92400e; line-height: 1.55;
-  }
-  table { border-collapse: collapse; font-size: 0.8rem; width: 100%; margin-top: 6px; }
-  th { background: #f8f4ff; padding: 6px 8px; border: 1px solid #e2d8f4; text-align: left; }
-  td { padding: 6px 8px; border: 1px solid #e2d8f4; vertical-align: top; }
-  code { background: #f1f5f9; border-radius: 3px; padding: 1px 5px; font-size: 0.78rem; }
-  .threshold {
-    margin-top: 14px; display: flex; gap: 10px; align-items: stretch;
-  }
+  /* Section 2 — confidence score */
+  .card .p2 { font-size: 0.74rem; line-height: 1.55; margin: 0 0 8px; color: #444; }
+  .threshold { display: flex; gap: 8px; }
   .threshold .box {
-    flex: 1; border-radius: 8px; padding: 10px 12px; font-size: 0.82rem; line-height: 1.5;
+    flex: 1; border-radius: 8px; padding: 7px 9px; font-size: 0.72rem; line-height: 1.45;
   }
   .threshold .pass { background: #d1fae5; border: 1px solid #10b981; color: #065f46; }
   .threshold .reject { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
-  .threshold .box b { display: block; font-size: 0.95rem; margin-bottom: 2px; }
-  .full {
-    grid-column: 1 / -1;
+  .threshold .box b { display: block; font-size: 0.85rem; margin-bottom: 1px; }
+  .note {
+    margin-top: 8px; padding: 7px 9px;
+    background: #fef9ec; border: 1px solid #fde9c8; border-radius: 8px;
+    font-size: 0.68rem; color: #92400e; line-height: 1.5;
   }
+  /* Section 3 — RAG criteria table */
+  table { border-collapse: collapse; width: 100%; font-size: 0.68rem; }
+  th { background: #f8f4ff; padding: 5px 7px; border: 1px solid #e2d8f4; text-align: left; }
+  td { padding: 5px 7px; border: 1px solid #e2d8f4; vertical-align: top; line-height: 1.4; }
+  td.cat { white-space: nowrap; font-weight: 600; color: #555; }
+  td.sys { white-space: nowrap; font-weight: 600; color: #7c3aed; }
+  td.extra { color: #b91c1c; }
   @media print {
     body { padding: 0; background: white; }
     .card { box-shadow: none; border: 1px solid #eee; }
@@ -87,59 +89,125 @@
 </style>
 </head>
 <body>
+<div class="page">
 <h1>AI 預算審核 — 判定邏輯與信心分數說明</h1>
-<p class="subtitle">一頁摘要：案件如何被分類到系統/類別/負責專家，以及 AI 初審的「信心分數」是怎麼來的</p>
+<p class="subtitle">一頁摘要：案件如何分類到系統/類別/負責專家、AI 初審信心分數的算法、以及各系統的通過/退件標準（專家覆核清單）</p>
 
-<div class="grid">
+<div class="grid-top">
 
   <div class="card">
     <h2><span class="n">1</span>案件如何判定「系統 / 類別 / 負責專家」</h2>
-    <ol class="steps">
-      <li><b>Relayout 最高優先</b>：內容出現「家具配置／隔間／裝修／拆除／機台進駐」等 → 直接判 Relayout，不看其他設備關鍵字</li>
-      <li><b>二次配 次高優先</b>：出現「二次配」就判定為二次配</li>
-      <li><b>建管</b>：僅限出現「法規／結構安全／違章」才判建管</li>
-      <li>通用零件（法蘭／蝶閥／管帽）又無明確主體 → Relayout</li>
-      <li>同時命中多系統、其中含 Relayout → 仍判 Relayout</li>
-      <li>案名同時出現兩個系統名稱 → 取「較後面出現」的系統</li>
-      <li><b>關鍵字出現次數計分</b>：以上都沒命中時，統計各系統關鍵字在全文出現的次數，<b>分數最高者勝出</b></li>
-      <li>若最高分打平、無法分高下 → 交給本地 AI 模型判定（保證落在 13 個系統白名單內，不會出現「未知」）</li>
-    </ol>
+    <div class="flow-grid">
+      <div class="step" data-n="1"><b>Relayout 最高優先</b>：出現家具配置/隔間/裝修/拆除/機台進駐</div>
+      <div class="step" data-n="2"><b>二次配</b> 次高優先：出現「二次配」</div>
+      <div class="step" data-n="3"><b>建管</b>：僅限出現法規/結構安全/違章</div>
+      <div class="step" data-n="4">通用零件(法蘭/蝶閥/管帽)無主體 → Relayout</div>
+      <div class="step" data-n="5">多系統命中且含 Relayout → 仍判 Relayout</div>
+      <div class="step" data-n="6">案名同時出現兩系統 → 取較後出現者</div>
+      <div class="step" data-n="7"><b>關鍵字出現次數計分</b>，分數最高者勝出</div>
+      <div class="step" data-n="8">分數打平 → 交本地 AI 判定（保證落在白名單）</div>
+    </div>
     <div class="flow-end">
-      判定出「系統」後 → 依固定對照表轉成 4 大類別（CIM相關 / 法遵ESH / 工程擴廠新工 / 設備擴充UTI）<br>
-      → 再依「類別＋系統」查表分配負責專家；同系統有多位專家時採<b>輪流分派</b>
+      判定「系統」後 → 依對照表轉成 4 大類別（CIM相關／法遵ESH／工程擴廠新工／設備擴充UTI）
+      → 再依「類別＋系統」查表分配負責專家；同系統多位專家採<b>輪流分派</b>
     </div>
   </div>
 
   <div class="card">
-    <h2><span class="n">2</span>信心分數（0~100）是怎麼算出來的？</h2>
-    <p style="font-size:0.85rem; line-height:1.6; margin:0 0 8px;">
-      AI 不是套公式計算，而是像一位<b>資深審查員看完資料後憑經驗打分</b>：
-      它會依案件所屬系統，對照一份<b>合規檢查清單</b>，逐項確認資料是否齊全，
-      再把「整體完整度的判斷」轉換成 0~100 的數字。
-    </p>
-    <table>
-      <thead><tr><th>系統範例：電力（必備 5 項，缺一不可）</th></tr></thead>
-      <tbody>
-        <tr><td>① 預算需求與目的　② 作法說明 (AS IS/TO BE)　③ 改善效益 (ROI&lt;3年)　④ 預算組成　⑤ 設備使用年限&gt;10年</td></tr>
-      </tbody>
-    </table>
-    <p style="font-size:0.8rem; line-height:1.6; margin:8px 0 0; color:#555;">
-      例如：5 項中有 3 項清楚、2 項缺或模糊 → AI 會判斷「資料約六成完整」，
-      因而給出接近 <b>55~65 分</b>這種區間的數字；若幾乎全部齊全，則會給到 80~95 分。
-      這個數字來自 AI 在大量訓練資料中學到的「審查打分慣例」，
-      所以同一份資料重複跑，分數會落在相近的區間（已設定 temperature=0，確保穩定一致）。
+    <h2><span class="n">2</span>信心分數（0~100）怎麼算出來？</h2>
+    <p class="p2">
+      AI 不是套公式，而是像<b>資深審查員看完資料憑經驗打分</b>：依案件系統對照右下表的
+      「合規檢查清單」逐項確認資料是否齊全，再把「整體完整度」轉換成 0~100 的數字
+      （清單 5 項中缺 2 項 → 約六成完整 → 約給 55~65 分；幾乎齊全 → 80~95 分）。
+      已設定 temperature=0，同一份資料重複跑分數會落在相近區間，不是隨機。
     </p>
     <div class="threshold">
       <div class="box pass"><b>≥ 70 分 → 通過</b>資料齊全，進入專家複審</div>
       <div class="box reject"><b>&lt; 70 分 → 退件</b>資料不足，退回補件</div>
     </div>
     <div class="note">
-      ⚠ 70 分的門檻是<b>程式碼強制規則</b>：最終「通過/退件」一定依分數覆寫，
-      不會出現「AI 寫 80 分卻判退件」這種前後矛盾。<br>
-      信心分數代表的是「<b>資料是否齊全、符合受理標準</b>」，不是「預算金額是否合理」——
-      金額合理性仍由專家複審把關。
+      ⚠ 70 分門檻為<b>程式碼強制規則</b>，最終通過/退件一定依分數覆寫，不會與 AI 文字描述矛盾。
+      信心分數代表「資料是否齊全、符合受理標準」，不代表「金額是否合理」——金額合理性仍由專家複審把關。
     </div>
   </div>
+
+</div>
+
+<div class="card">
+  <h2><span class="n">3</span>各系統「通過 / 退件」判定標準（專家覆核清單 RAG）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:9%">類別</th>
+        <th style="width:11%">系統</th>
+        <th style="width:50%">通過所需項目（缺一即可能退件）</th>
+        <th style="width:30%">額外「一律退件」特殊條件</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="cat">設備擴充<br>(UTI)</td>
+        <td class="sys">空調 / 空壓</td>
+        <td>①目的性說明（老舊/擴張/節能） ②技術方案（型號/規劃/效益） ③預算組成（金額/報價）</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">設備擴充<br>(UTI)</td>
+        <td class="sys">水務 / 抽氣</td>
+        <td>【預算報告】、【成本分析工資比】（無塵室外&gt;50% 或無塵室內&gt;20% 需詳細說明）</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">設備擴充<br>(UTI)</td>
+        <td class="sys">電力</td>
+        <td>①需求與目的 ②作法(AS IS/TO BE) ③改善效益 ROI&lt;3年 ④預算組成 ⑤汰換設備使用年限&gt;10年</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">工程擴廠<br>(新工)</td>
+        <td class="sys">二次配 / Relayout / 空調</td>
+        <td>①需求原因 ②圖簽 ③簽核UM ④Layout圖說(AS IS/TO BE) ⑤供應系統/管路負載評估 ⑥預算組成 ⑦料單 ⑧供料成本分析報告</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">工程擴廠<br>(新工)</td>
+        <td class="sys">水務 / 抽氣</td>
+        <td>①需求原因 ②簽核UM ③Layout圖說(AS IS/TO BE) ④供應系統/管路負載評估 ⑤改善效益 ROI&lt;3年 ⑥預算組成/成本分析報告 ⑦料單</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">CIM相關</td>
+        <td class="sys">資安（含原監控：SCADA/PLC/中控/CCTV）</td>
+        <td>①目的說明 ②作法說明 ③架構圖說 ④料件/工資單位成本 ⑤量化/質化效益</td>
+        <td class="extra">任一即退件：料件成本&gt;前購價10% ／ 工資成本&gt;新建廠設計10% ／ 每50M管路&gt;3工 ／ 每60M線路&gt;2工 ／ ROI&gt;3年</td>
+      </tr>
+      <tr>
+        <td class="cat">CIM相關</td>
+        <td class="sys">AI自動化</td>
+        <td>①目的說明 ②作法說明 ③架構圖說 ④料件/工資單位成本 ⑤量化/質化效益</td>
+        <td class="extra">任一即退件：料件成本&gt;前購價10% ／ 工資成本&gt;新建廠設計10% ／ ROI&gt;3年</td>
+      </tr>
+      <tr>
+        <td class="cat">法遵<br>(ESH)</td>
+        <td class="sys">消防 / 建管</td>
+        <td>①需求原因 ②需求Layout&範圍(AS IS/TO BE、面積) ③施工做法說明 ④效益說明 ⑤金額估價依據(料單/單位造價分析) ⑥類似案件前購單位造價</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">法遵<br>(ESH)</td>
+        <td class="sys">環保</td>
+        <td>①是否為公司推行政策 ②是否違反法規 ③效益評估完整（風險/優劣分析/軟硬體與維運成本）</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="cat">法遵<br>(ESH)</td>
+        <td class="sys">安全</td>
+        <td>①需求與目的 ②施工作法、Layout圖說(AS IS/TO BE) ③改善效益 ④預算組成、成本分析報告 ⑤料單</td>
+        <td>—</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 
 </div>
 </body>
