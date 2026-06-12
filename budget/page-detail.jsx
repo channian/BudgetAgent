@@ -1,5 +1,16 @@
 /* Budget detail / approval page */
 
+// AI 原因文字以連續敘述存放（無 \n），但每個「【段落標題】」應另起一行並空一行
+function renderReason(text) {
+  if (!text) return "—";
+  return text.split(/(?=【)/g).map((part, i) => (
+    <React.Fragment key={i}>
+      {i > 0 && <><br/><br/></>}
+      {part}
+    </React.Fragment>
+  ));
+}
+
 const ACTION_LABELS = {
   CREATE:                "建立預算單",
   UPDATE:                "欄位更新",
@@ -226,7 +237,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
             <div className="card-body">
               <div className={`ai-block${budget.aiResult === "approve" ? " approve" : ""}`}>
                 <h4>原因 / Reason</h4>
-                <div className="reason">{budget.aiReason || "—"}</div>
+                <div className="reason">{renderReason(budget.aiReason)}</div>
               </div>
             </div>
           </div>
