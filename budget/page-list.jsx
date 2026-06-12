@@ -641,8 +641,8 @@ function ListPage({ scope, budgets, loading, onRow, onNew, onRefresh, currentUse
   const awaitingExpertView= React.useMemo(() => applyView(awaitingExpert), [applyView, budgets]);
   const completedView     = React.useMemo(() => {
     let r = applyView(completed);
-    if (filterStart) r = r.filter(b => b.signDate && b.signDate >= filterStart);
-    if (filterEnd)   r = r.filter(b => b.signDate && b.signDate <= filterEnd + "T23:59:59");
+    if (filterStart) r = r.filter(b => b.signDate && MOCK.fmtDateShort(b.signDate) >= filterStart);
+    if (filterEnd)   r = r.filter(b => b.signDate && MOCK.fmtDateShort(b.signDate) <= filterEnd);
     if (filterCat)   r = r.filter(b => b.category === filterCat);
     if (filterSys)   r = r.filter(b => b.subCategory === filterSys);
     return r;
