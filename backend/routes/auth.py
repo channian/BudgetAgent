@@ -1,7 +1,7 @@
 from functools import wraps
 import logging
 from flask import Blueprint, request, jsonify, session
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import check_password_hash
 from db import cursor as db_cursor, row_to_dict
 
 logger = logging.getLogger(__name__)
@@ -100,17 +100,20 @@ def login():
 
     # ── Step 2: try Windows AD (NTLM) authentication ─────────────────
     ad_error = None
+    logger.warning("[LOGIN] empno=%r  starting AD auth", empno)
     try:
         from utils.ldap_auth import ad_authenticate
+        logger.warning("[LOGIN] ad_authenticate imported OK, calling now…")
         ad_info = ad_authenticate(empno, password)
+        logger.warning("[LOGIN] ad_authenticate returned success=%s", ad_info is not None)
     except ImportError as e:
         ad_info = None
         ad_error = f"ldap3 套件未安裝：{e}"
-        logger.warning("AD login skipped — ldap3 not installed: %s", e)
+        logger.warning("[LOGIN] ImportError (ldap3 missing): %s", e)
     except Exception as e:
         ad_info = None
         ad_error = str(e)
-        logger.warning("AD login exception for %s: %s", empno, e)
+        logger.warning("[LOGIN] Exception during AD auth: %s: %s", type(e).__name__, e)
 
     if ad_info:
         # AD succeeded → sync latest name / email from HR DB
@@ -164,29 +167,6 @@ def me():
         return jsonify(error="未登入"), 401
     return jsonify(user=_safe(user))
 
-
-@auth_bp.put("/me/password")
-@require_auth
-def change_my_password():
-    """Any logged-in user can replace their own password."""
-    user     = current_user()
-    data     = request.json or {}
-    new_pass = (data.get("password") or "").strip()
-
-    if not new_pass:
-        return jsonify(error="密碼不得為空"), 400
-
-    hashed = generate_password_hash(new_pass)
-    try:
-        with db_cursor(commit=True) as cur:
-            cur.execute(
-                "UPDATE budget.users SET password = %s WHERE id = %s",
-                (hashed, user["id"]),
-            )
-    except Exception as e:
-        return jsonify(error=str(e)), 500
-
-    return jsonify(ok=True)
 
 
 @auth_bp.get("/lookup_employee")
@@ -337,5 +317,77 @@ def test_ad():
         result["verdict"] = f"❌ LDAP 連線建立失敗：{e}"
         return jsonify(result), 200
 
-    result["verdict"] = "✅ AD 伺服器可達，LDAP 連線正常。若仍無法登入，原因是 NTLM 認證被拒（帳密錯誤或帳號鎖定）。查 Flask log 確認。"
+    result["verdict"] = "✅ AD 伺服器可達。若登入失敗請用 POST /api/auth/test-ad-login 測試 NTLM 認證。"
+    return jsonify(result), 200
+
+
+@auth_bp.post("/test-ad-login")
+def test_ad_login():
+    """
+    NTLM 認證診斷（任何人可呼叫，不需登入）。
+    用法：POST /api/auth/test-ad-login  body: {"username": "...", "password": "..."}
+    直接用提供的帳密測試所有 bind 策略，回報每一種的精確結果。
+    """
+    data     = request.json or {}
+    empno    = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+
+    if not empno or not password:
+        return jsonify(error="username and password required"), 400
+
+    try:
+        from ldap3 import (Server, Connection, Tls,
+                           NTLM, SIMPLE, NONE as LDAP_NONE)
+        from config import LDAP_SERVER, LDAP_DOMAIN, LDAP_BASE_DN
+    except ImportError as e:
+        return jsonify(error=f"ldap3 not installed: {e}"), 500
+
+    import ssl
+    fqdn     = ".".join(p.split("=")[1] for p in LDAP_BASE_DN.split(",") if p.upper().startswith("DC="))
+    user_nt  = f"{LDAP_DOMAIN}\\{empno}"
+    user_upn = f"{empno}@{fqdn}"
+    tls      = Tls(validate=ssl.CERT_NONE)
+
+    result = {"server": LDAP_SERVER, "domain": LDAP_DOMAIN, "fqdn": fqdn,
+              "user_nt": user_nt, "user_upn": user_upn,
+              "base_dn": LDAP_BASE_DN, "attempts": []}
+
+    if not LDAP_SERVER:
+        result["verdict"] = "❌ LDAP_SERVER 未設定"
+        return jsonify(result), 200
+
+    strategies = [
+        ("SIMPLE UPN/LDAPS", dict(
+            server=Server(LDAP_SERVER, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
+            user=user_upn, authentication=SIMPLE)),
+        ("NTLM sealed/389", dict(
+            server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
+            user=user_nt, authentication=NTLM, session_security="ENCRYPT")),
+        ("NTLM plain/389", dict(
+            server=Server(LDAP_SERVER, port=389, get_info=LDAP_NONE),
+            user=user_nt, authentication=NTLM)),
+        ("NTLM LDAPS/636", dict(
+            server=Server(LDAP_SERVER, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
+            user=user_nt, authentication=NTLM)),
+    ]
+
+    for label, kw in strategies:
+        srv       = kw.pop("server")
+        bind_user = kw.pop("user")
+        attempt   = {"strategy": label, "bind_user": bind_user}
+        try:
+            conn = Connection(srv, user=bind_user, password=password, **kw)
+            ok = conn.bind()
+            attempt["bind_ok"] = ok
+            attempt["result"]  = str(conn.result)
+            result["attempts"].append(attempt)
+            if ok:
+                result["verdict"] = f"✅ bind 成功（策略：{label}）— AD 認證正常運作"
+                conn.unbind()
+                return jsonify(result), 200
+        except Exception as e:
+            attempt["exception"] = str(e)
+            result["attempts"].append(attempt)
+
+    result["verdict"] = "❌ 所有策略皆失敗。查看每個 attempt 的 result 判斷原因（data 52e=密碼錯, 775=帳號鎖定, 532=密碼過期, 533=帳號停用）。"
     return jsonify(result), 200

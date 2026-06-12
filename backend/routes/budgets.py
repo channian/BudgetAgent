@@ -1,9 +1,10 @@
-import io, csv, json, hashlib, datetime
+import io, os, csv, json, hashlib, datetime
 from flask import Blueprint, request, jsonify, send_file
 from psycopg2.extras import Json as PgJson
 from db import cursor as db_cursor, row_to_dict
 from utils.audit import log as audit_log
 from routes.auth import require_auth, current_user
+from routes.attachments import UPLOAD_DIR
 
 budgets_bp = Blueprint("budgets", __name__)
 
@@ -21,6 +22,23 @@ def init_lock_columns():
                 ALTER TABLE budget.budget_requests
                     ADD COLUMN IF NOT EXISTS locked_by  VARCHAR NULL,
                     ADD COLUMN IF NOT EXISTS locked_at  TIMESTAMP NULL
+            """)
+    except Exception:
+        pass
+
+
+def init_frontend_submitted_column():
+    """Add frontend_submitted flag column if not present.
+
+    FALSE (default) = created by RPA/AI pipeline directly.
+    TRUE            = created or confirmed by a human via the frontend form.
+    Only cases that are TRUE + have AI data are eligible for 派發中心.
+    """
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute("""
+                ALTER TABLE budget.budget_requests
+                    ADD COLUMN IF NOT EXISTS frontend_submitted BOOLEAN DEFAULT FALSE
             """)
     except Exception:
         pass
@@ -166,9 +184,19 @@ def create_budget():
             )
             existing = [row_to_dict(r) for r in cur.fetchall()]
 
-        # 1) Identical data already present → ignore (re-scan no-op).
+        # 1) Identical data already present → confirm if not yet frontend_submitted, else ignore.
         for ex in existing:
             if _case_signature(ex) == incoming_sig:
+                if not ex.get("frontend_submitted"):
+                    with db_cursor(commit=True) as cur:
+                        cur.execute(
+                            "UPDATE budget.budget_requests SET frontend_submitted=TRUE, updated_at=NOW() WHERE id=%s",
+                            (ex["id"],),
+                        )
+                    audit_log(ex["id"], "CONFIRM_FRONTEND", user.get("name", "system"), ex, {"frontend_submitted": True})
+                    return jsonify(id=ex["id"], status=ex["status"], action="confirmed",
+                                   project_name=ex["project_name"],
+                                   message="已確認為前端案件，準備進入派發中心。"), 200
                 return jsonify(id=ex["id"], status=ex["status"], action="ignored",
                                project_name=ex["project_name"],
                                message="資料未變更，已存在相同案件，已略過。"), 200
@@ -177,12 +205,34 @@ def create_budget():
 
         # 2) Case still under review, data changed → update in place.
         if latest and latest["status"] not in DECIDED_STATUSES:
+            # "Confirm" scenario: frontend submits with no AI data but existing case (from RPA) has AI data.
+            # Preserve AI data; just attach frontend_submitted flag and update human-editable fields.
+            if not ai_obj and latest.get("ai_result"):
+                with db_cursor(commit=True) as cur:
+                    cur.execute(
+                        """UPDATE budget.budget_requests SET
+                               category    = COALESCE(%s, category),
+                               sub_category= COALESCE(%s, sub_category),
+                               expert_name = COALESCE(%s, expert_name),
+                               owner       = COALESCE(%s, owner),
+                               frontend_submitted = TRUE,
+                               updated_at  = NOW()
+                           WHERE id=%s RETURNING *""",
+                        (data.get("category") or None, data.get("sub_category") or None,
+                         data.get("expert_name") or None, owner or None, latest["id"]),
+                    )
+                    after = row_to_dict(cur.fetchone())
+                audit_log(latest["id"], "CONFIRM_FRONTEND", user.get("name", "system"), latest, after)
+                return jsonify(id=latest["id"], status=after["status"], action="confirmed",
+                               project_name=after["project_name"],
+                               message="已與 AI 建單合併確認，準備進入派發中心。"), 200
+            # Normal update in place.
             with db_cursor(commit=True) as cur:
                 cur.execute(
                     """UPDATE budget.budget_requests SET
                            category=%s, sub_category=%s, expert_name=%s,
                            owner=%s, amount=%s, ai_comment=%s, ai_result=%s,
-                           status=%s, updated_at=NOW()
+                           status=%s, frontend_submitted=TRUE, updated_at=NOW()
                        WHERE id=%s RETURNING *""",
                     (data.get("category"), data.get("sub_category"),
                      data.get("expert_name"), owner, data.get("amount", 0),
@@ -208,8 +258,9 @@ def create_budget():
             cur.execute(
                 """INSERT INTO budget.budget_requests
                        (project_name, week, category, sub_category, expert_name,
-                        owner, amount, ai_comment, ai_result, status, note)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        owner, amount, ai_comment, ai_result, status, note,
+                        frontend_submitted)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
                    RETURNING id""",
                 (insert_name, iso_week, data.get("category"),
                  data.get("sub_category"), data.get("expert_name"), owner,
@@ -257,7 +308,7 @@ def update_budget(budget_id):
     data = request.json or {}
     user = current_user()
 
-    allowed = {"expert_name", "owner", "amount", "category", "sub_category", "note",
+    allowed = {"budget_no", "expert_name", "owner", "amount", "category", "sub_category", "note",
                "expert_comment", "expert_decision"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
@@ -296,9 +347,11 @@ def dispatch_budget(budget_id):
     if user.get("role") != "admin":
         return jsonify(error="僅系統管理員可執行派發"), 403
 
-    data        = request.json or {}
-    budget_no   = (data.get("budget_no")   or "").strip() or None
-    expert_name = (data.get("expert_name") or "").strip() or None
+    data         = request.json or {}
+    budget_no    = (data.get("budget_no")    or "").strip() or None
+    expert_name  = (data.get("expert_name")  or "").strip() or None
+    category     = (data.get("category")     or "").strip() or None
+    sub_category = (data.get("sub_category") or "").strip() or None
 
     try:
         with db_cursor() as cur:
@@ -315,12 +368,14 @@ def dispatch_budget(budget_id):
                 """UPDATE budget.budget_requests
                    SET budget_no    = COALESCE(%s, budget_no),
                        expert_name  = COALESCE(%s, expert_name),
+                       category     = COALESCE(%s, category),
+                       sub_category = COALESCE(%s, sub_category),
                        dispatch_date = NOW(),
                        status        = 'EXPERT_REVIEW',
                        updated_at    = NOW()
                    WHERE id = %s
                    RETURNING *""",
-                (budget_no, expert_name, budget_id),
+                (budget_no, expert_name, category, sub_category, budget_id),
             )
             after = row_to_dict(cur.fetchone())
     except Exception as e:
@@ -365,6 +420,8 @@ def dispatch_budget(budget_id):
                     budget_no=after.get("budget_no"),
                     amount=after.get("amount"),
                     dispatch_date=after.get("dispatch_date"),
+                    category=after.get("category"),
+                    system=after.get("sub_category"),
                 )
                 email_status = "sent" if ok else "failed"
             else:
@@ -373,6 +430,91 @@ def dispatch_budget(budget_id):
             import logging
             logging.getLogger(__name__).warning("Email dispatch error: %s", e)
             email_status = "error"
+
+    return jsonify(budget=after, email_status=email_status)
+
+
+# ── Reassign a dispatched case to a new expert (admin only) ──────────
+@budgets_bp.post("/budgets/<int:budget_id>/reassign")
+@require_auth
+def reassign_budget(budget_id):
+    user = current_user()
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可重派案件"), 403
+
+    data        = request.json or {}
+    expert_name = (data.get("expert_name") or "").strip()
+    reason      = (data.get("reason")      or "").strip()
+    if not expert_name:
+        return jsonify(error="請選擇新的負責專家"), 400
+    if not reason:
+        return jsonify(error="請填寫重派原因"), 400
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (budget_id,))
+            before_row = cur.fetchone()
+        if not before_row:
+            return jsonify(error="案件不存在"), 404
+        before = row_to_dict(before_row)
+
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests
+                   SET expert_name   = %s,
+                       dispatch_date = NOW(),
+                       status        = 'EXPERT_REVIEW',
+                       updated_at    = NOW()
+                   WHERE id = %s
+                   RETURNING *""",
+                (expert_name, budget_id),
+            )
+            after = row_to_dict(cur.fetchone())
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    audit_log(budget_id, "REASSIGN", user.get("name", "system"), before, after)
+    _notify_roles(["admin"],
+        f"🔄 {user.get('name','系統')} 重派案件「{before['project_name']}」(#{budget_id})，"
+        f"原因：{reason}，新指派：{expert_name}。")
+
+    # In-app notification to new expert
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id FROM budget.users WHERE name = %s", (expert_name,))
+            eu = cur.fetchone()
+        if eu:
+            with db_cursor(commit=True) as cur:
+                cur.execute(
+                    "INSERT INTO budget.notifications (user_id, text) VALUES (%s, %s)",
+                    (eu["id"],
+                     f"📋 案件「{before['project_name']}」(#{budget_id}) 已重派給您，請盡速審核。"),
+                )
+    except Exception:
+        pass
+
+    # Email to new expert
+    email_status = None
+    try:
+        from utils.expert_directory import resolve_email
+        from utils.email_service import send_dispatch_email
+        expert_email = resolve_email(expert_name)
+        if expert_email:
+            ok = send_dispatch_email(
+                to_email=expert_email, expert_name=expert_name,
+                project_name=before["project_name"], budget_id=budget_id,
+                budget_no=after.get("budget_no"), amount=after.get("amount"),
+                dispatch_date=after.get("dispatch_date"),
+                category=after.get("category"),
+                system=after.get("sub_category"),
+            )
+            email_status = "sent" if ok else "failed"
+        else:
+            email_status = "no_email"
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Email reassign error: %s", e)
+        email_status = "error"
 
     return jsonify(budget=after, email_status=email_status)
 
@@ -478,6 +620,120 @@ def release_lock(budget_id):
     return jsonify(ok=True)
 
 
+# ── Frontend confirmation ─────────────────────────────────────────────
+@budgets_bp.post("/budgets/<int:budget_id>/confirm-frontend")
+@require_auth
+def confirm_frontend(budget_id):
+    """Mark an AI-created case as frontend-confirmed, making it eligible for 派發中心."""
+    user = current_user()
+    try:
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests
+                   SET frontend_submitted=TRUE, updated_at=NOW()
+                   WHERE id=%s RETURNING *""",
+                (budget_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify(error="案件不存在"), 404
+            after = row_to_dict(row)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+    audit_log(budget_id, "CONFIRM_FRONTEND", user.get("name", "system"), None, after)
+    return jsonify(ok=True, id=after["id"], status=after["status"])
+
+
+# ── Manual merge: AI 建單 ↔ 前端建單 ──────────────────────────────────
+@budgets_bp.post("/budgets/<int:ai_id>/merge-into/<int:frontend_id>")
+@require_auth
+def merge_ai_case(ai_id, frontend_id):
+    """Manually pair an AI 建單 case with a 前端建單 case whose project_name
+    didn't match automatically during ingest.
+
+    AI fields (category / sub_category / expert_name / ai_comment /
+    ai_result) are copied onto the 前端建單 record; its own project_name,
+    owner, amount, budget_no etc. are kept as-is. The AI 建單 record (and
+    its audit history / attachments) is folded into the surviving record
+    and removed.
+    """
+    user = current_user()
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行合併"), 403
+
+    if ai_id == frontend_id:
+        return jsonify(error="不能合併同一筆案件"), 400
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (ai_id,))
+            ai_row = cur.fetchone()
+            cur.execute("SELECT * FROM budget.budget_requests WHERE id = %s", (frontend_id,))
+            fe_row = cur.fetchone()
+        if not ai_row or not fe_row:
+            return jsonify(error="案件不存在"), 404
+        ai_case = row_to_dict(ai_row)
+        fe_case = row_to_dict(fe_row)
+
+        if ai_case.get("frontend_submitted"):
+            return jsonify(error="來源案件已是前端確認案件，無法作為 AI 建單合併來源"), 400
+        if not fe_case.get("frontend_submitted"):
+            return jsonify(error="目標案件不是前端建單"), 400
+
+        ai_result = ai_case.get("ai_result")
+        if isinstance(ai_result, (dict, list)):
+            ai_result = PgJson(ai_result)
+
+        with db_cursor(commit=True) as cur:
+            cur.execute(
+                """UPDATE budget.budget_requests SET
+                       category    = COALESCE(%s, category),
+                       sub_category= COALESCE(%s, sub_category),
+                       expert_name = COALESCE(%s, expert_name),
+                       ai_comment  = %s,
+                       ai_result   = %s,
+                       updated_at  = NOW()
+                   WHERE id = %s RETURNING *""",
+                (ai_case.get("category"), ai_case.get("sub_category"),
+                 ai_case.get("expert_name"), ai_case.get("ai_comment"),
+                 ai_result, frontend_id),
+            )
+            after = row_to_dict(cur.fetchone())
+
+            # Re-point audit history + attachments from the AI 建單 record
+            # onto the surviving 前端建單 record before deleting it.
+            cur.execute("UPDATE budget.audit_logs SET request_id=%s WHERE request_id=%s",
+                         (frontend_id, ai_id))
+            cur.execute("SELECT * FROM budget.attachments WHERE budget_id=%s", (ai_id,))
+            ai_attachments = [row_to_dict(r) for r in cur.fetchall()]
+            cur.execute("UPDATE budget.attachments SET budget_id=%s WHERE budget_id=%s",
+                         (frontend_id, ai_id))
+            cur.execute("DELETE FROM budget.budget_requests WHERE id=%s", (ai_id,))
+
+        # Move uploaded files on disk so they match the re-pointed attachment rows.
+        if ai_attachments:
+            src_dir = os.path.join(UPLOAD_DIR, str(ai_id))
+            dst_dir = os.path.join(UPLOAD_DIR, str(frontend_id))
+            os.makedirs(dst_dir, exist_ok=True)
+            for att in ai_attachments:
+                src = os.path.join(src_dir, att["filename"])
+                dst = os.path.join(dst_dir, att["filename"])
+                if os.path.exists(src):
+                    os.replace(src, dst)
+            try:
+                os.rmdir(src_dir)
+            except OSError:
+                pass
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    audit_log(frontend_id, "MERGE_AI_CASE", user.get("name", "system"),
+              {"merged_from": ai_case}, after)
+    return jsonify(id=frontend_id, status=after["status"], action="merged",
+                   project_name=after["project_name"],
+                   message=f"已將 AI 建單「{ai_case['project_name']}」合併至「{after['project_name']}」，準備進入派發中心。"), 200
+
+
 # ── Expert review (save comment + recommendation, no finalise) ───────
 @budgets_bp.post("/budgets/<int:budget_id>/review")
 @require_auth
@@ -534,7 +790,7 @@ def review_budget(budget_id):
         return jsonify(error=str(e)), 500
 
     audit_log(budget_id, "EXPERT_COMMENT", user.get("name", "system"), before, after)
-    _notify_roles(["admin", "boss"],
+    _notify_roles(["admin"],
         f"📝 {user.get('name','專家')} 已完成案件「{before['project_name']}」(#{budget_id}) 的專家評論，待簽核。")
     return jsonify(budget=after)
 
@@ -547,8 +803,8 @@ def approve_budget(budget_id):
     user    = current_user()
     comment = data.get("comment", "")
 
-    if user.get("role") not in ("admin", "boss"):
-        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行簽核"), 403
 
     try:
         with db_cursor() as cur:
@@ -599,8 +855,8 @@ def reject_budget(budget_id):
     final      = bool(data.get("final", False))
     new_status = "REJECTED" if final else "PENDING_ACTION"
 
-    if user.get("role") not in ("admin", "boss"):
-        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行簽核"), 403
 
     try:
         with db_cursor() as cur:
@@ -649,8 +905,8 @@ def batch_sign():
     rejected if the expert recommended 退件. If any single case fails
     validation, the whole batch rolls back and nothing is signed."""
     user = current_user()
-    if user.get("role") not in ("admin", "boss"):
-        return jsonify(error="僅 boss 與系統管理員可執行簽核"), 403
+    if user.get("role") != "admin":
+        return jsonify(error="僅系統管理員可執行簽核"), 403
 
     ids = (request.json or {}).get("ids") or []
     if not isinstance(ids, list) or not ids:
@@ -843,33 +1099,307 @@ def export_budgets():
 
 
 # ── Import (CSV / XLSX) ───────────────────────────────────────────────
+
+# Aliases for the standard "new budget" import (→ AI_REVIEW)
 IMPORT_ALIASES = {
     "project_name": ["項目名稱", "Project Name", "project_name", "project", "案件名稱"],
     "category":     ["類別", "category", "判定類別"],
-    "owner":        ["預算負責人", "owner", "負責人"],
+    "owner":        ["預算負責人", "Owner", "owner", "負責人"],
     "amount":       ["金額", "amount", "金額 (NT$)"],
     "budget_no":    ["預算單號", "BudgetNo.", "BudgetNo", "Budget No.", "Budget No", "budget_no"],
 }
 
+# Aliases for the "completed history" import (→ CLOSED / REJECTED)
+COMPLETED_IMPORT_ALIASES = {
+    "project_name":    ["Project Name", "項目名稱", "案件名稱", "project_name"],
+    "week":            ["週數(w)", "週數", "week", "Week"],
+    # NOTE: Excel "類別" = 系統 (sub_category), NOT 大類別 (category)
+    "category":        ["category", "判定類別"],
+    "sub_category":    ["類別", "系統", "判定系統", "sub_category", "Sub Category"],
+    # Excel 的「Owner」欄存的是負責專家，對應 expert_name（非 owner）
+    "expert_name":     ["負責專家", "Owner", "Expert", "expert_name"],
+    "budget_no":       ["BudgetNo.", "BudgetNo", "Budget No.", "預算單號", "budget_no"],
+    "owner":           ["預算負責人", "owner", "負責人"],
+    "amount":          ["金額 NT", "金額(NT$)", "金額(NT)", "金額", "amount", "金額 (NT$)"],
+    "expert_comment":  ["專家評論", "expert_comment"],
+    "expert_decision": ["審核處置", "expert_decision"],
+    "dispatch_date":   ["派送日期", "dispatch_date"],
+    "sign_date":       ["簽核日期", "sign_date"],
+    "cycle_time":      ["Cycle time", "Cycle Time", "cycle_time", "CycleTime"],
+    "note":            ["備註", "note"],
+}
 
-def _resolve_header(header):
-    norm = {str(h).strip(): i for i, h in enumerate(header)}
-    idx = {}
-    for field, aliases in IMPORT_ALIASES.items():
-        for a in aliases:
-            if a in norm:
-                idx[field] = norm[a]
-                break
+
+def _norm_header(s):
+    """Normalise a header cell for tolerant matching: strip, lowercase,
+    and remove whitespace / brackets / punctuation that varies between files."""
+    s = str(s).strip().lower()
+    for ch in (" ", "　", "\t", "\n", "\r", "(", ")", "（", "）",
+               "[", "]", "．", ".", "_", "-", "/", "\\", "$", "：", ":"):
+        s = s.replace(ch, "")
+    return s
+
+
+def _resolve_header(header, aliases=None):
+    """Map each logical field to a column index, tolerant of header-text
+    variations. Three passes (most-strict first), never reusing a column:
+      1) exact (stripped) match
+      2) normalised exact match (whitespace/bracket/case-insensitive)
+      3) normalised prefix match (e.g. '金額(NT$)' ← alias '金額')
+    """
+    if aliases is None:
+        aliases = IMPORT_ALIASES
+
+    raw, norm = {}, {}
+    for i, h in enumerate(header):
+        if h is None:
+            continue
+        raw.setdefault(str(h).strip(), i)
+        norm.setdefault(_norm_header(h), i)
+
+    idx, used = {}, set()
+
+    # Pass 1 — exact stripped match
+    for field, alts in aliases.items():
+        for a in alts:
+            key = str(a).strip()
+            if key in raw and raw[key] not in used:
+                idx[field] = raw[key]; used.add(raw[key]); break
+
+    # Pass 2 — normalised exact match
+    for field, alts in aliases.items():
+        if field in idx:
+            continue
+        for a in alts:
+            k = _norm_header(a)
+            if k and k in norm and norm[k] not in used:
+                idx[field] = norm[k]; used.add(norm[k]); break
+
+    # Pass 3 — normalised prefix match (alias is a prefix of the header)
+    for field, alts in aliases.items():
+        if field in idx:
+            continue
+        for a in alts:
+            k = _norm_header(a)
+            if not k or len(k) < 2:
+                continue
+            hit = next((j for hn, j in norm.items()
+                        if j not in used and hn.startswith(k)), None)
+            if hit is not None:
+                idx[field] = hit; used.add(hit); break
+
     return idx
 
 
 def _parse_amount(v):
+    """Extract a numeric amount from anything: 1,234,567 / NT$1,234 / $1234 /
+    1234元 / 1.2 → float. Returns 0 when no number is present."""
     if v is None:
         return 0
+    if isinstance(v, (int, float)):
+        return float(v)
+    import re as _re
+    m = _re.search(r'-?\d[\d,]*(?:\.\d+)?', str(v))
+    if not m:
+        return 0
     try:
-        return float(str(v).replace(",", "").replace("NT$", "").strip())
+        return float(m.group().replace(",", ""))
     except ValueError:
         return 0
+
+
+def _parse_decision(v):
+    """Normalise an 審核處置 value to ('退件'|'通過'|None, status).
+    Accepts Chinese (退件/通過/核可…) and English (reject/approve/pass…)."""
+    raw = (v or "").strip()
+    low = raw.lower()
+    reject_kw  = ("退件", "退回", "拒")
+    approve_kw = ("通過", "核可", "核准", "核準")
+    if any(k in raw for k in reject_kw) or any(k in low for k in ("reject", "decline", "fail", "deny")):
+        return "退件", "REJECTED"
+    if any(k in raw for k in approve_kw) or any(k in low for k in ("approve", "pass", "accept", "通过")):
+        return "通過", "CLOSED"
+    # present-but-unrecognised → leave decision blank, treat as closed history
+    return None, "CLOSED"
+
+
+def _parse_week(v, default):
+    """Accept 'W21', '21', 21 → int week number."""
+    if v is None:
+        return default
+    import re as _re
+    m = _re.search(r'\d+', str(v))
+    return int(m.group()) if m else default
+
+
+def _parse_date(v):
+    """Accept Excel datetime, date object, or string → date string or None."""
+    if v is None:
+        return None
+    import datetime as _dt
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.strftime("%Y-%m-%d")
+    s = str(v).strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y", "%Y%m%d"):
+        try:
+            return _dt.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return s  # return as-is; DB will reject invalid dates gracefully
+
+
+def _parse_cycle(v):
+    """Accept '3', '3天', '3.5' → int days or None."""
+    if v is None:
+        return None
+    import re as _re
+    m = _re.search(r'[\d.]+', str(v))
+    if not m:
+        return None
+    try:
+        return int(float(m.group()))
+    except ValueError:
+        return None
+
+
+# ── Category derivation from (系統, 專家) ──────────────────────────────
+# The completed-history Excel only carries 系統 (sub_category) + Owner (專家),
+# not the top-level 類別 (category). This table lets us back-fill category
+# from the (sub_category, expert) pair. Keys use the canonical category names
+# already used by pipeline_1 / CAT_NAME_TO_ID so chip colours stay consistent.
+CATEGORY_SYSTEM_EXPERTS = {
+    "設備擴充 (UTI)": {
+        "空調": ["Jackie", "JackieCT", "Yuchi"],
+        "空壓": ["Yubin", "UJ"],
+        "水務": ["Yichi", "Soil"],
+        "抽氣": ["Yichi"],
+        "電力": ["Meko", "Andy"],
+    },
+    "工程擴廠 (新工)": {
+        "二次配":   ["CC", "Asheng", "Matt"],
+        "Relayout": ["CC", "Asheng", "Matt"],
+        "空調": ["Asheng", "Shiou", "Yufong"],
+        "空壓": ["Asheng", "JinCR", "Jin", "Poli"],
+        "水務": ["Yanfang", "Fslin"],
+        "抽氣": ["Yanfang", "Mex"],
+        "電力": ["Asheng"],
+    },
+    "CIM相關": {
+        "監控":     ["Hank", "Michael"],
+        "AI自動化": ["Huching", "Michael"],
+    },
+    "法遵 (ESH)": {
+        "消防": ["Minghua", "CT"],
+        "建管": ["Minghua", "CT"],
+        "環保": ["Tingyu", "Chipin"],
+        "安全": ["Camilla", "Yuyun"],
+    },
+}
+
+
+def _build_category_indexes():
+    """Build reverse lookups from the (category → 系統 → [專家]) table."""
+    pair, by_expert, by_system = {}, {}, {}
+    for cat, systems in CATEGORY_SYSTEM_EXPERTS.items():
+        for sysname, experts in systems.items():
+            by_system.setdefault(sysname.strip().lower(), set()).add(cat)
+            for e in experts:
+                e = (e or "").strip()
+                if not e:
+                    continue
+                pair[(sysname.strip().lower(), e.lower())] = cat
+                by_expert.setdefault(e.lower(), set()).add(cat)
+    return pair, by_expert, by_system
+
+
+_CAT_PAIR_IDX, _CAT_EXPERT_IDX, _CAT_SYSTEM_IDX = _build_category_indexes()
+
+
+def _derive_category(sub_category, expert_name):
+    """Best-effort top-level 類別 from (系統, 專家). Returns None if undecidable."""
+    sub = (sub_category or "").strip().lower()
+    exp = (expert_name or "").strip().lower()
+    # 1) exact (系統, 專家) pair — most precise
+    if (sub, exp) in _CAT_PAIR_IDX:
+        return _CAT_PAIR_IDX[(sub, exp)]
+    # 2) 專家 alone, if it maps to exactly one category
+    cats = _CAT_EXPERT_IDX.get(exp)
+    if cats and len(cats) == 1:
+        return next(iter(cats))
+    # 3) 系統 alone, if unambiguous
+    scats = _CAT_SYSTEM_IDX.get(sub)
+    if scats and len(scats) == 1:
+        return next(iter(scats))
+    return None
+
+
+def _find_header_row(rows, max_scan=6):
+    """Scan the first `max_scan` rows and return the index of the row that
+    contains the most recognised column aliases (from either alias table).
+    Falls back to row 0 if nothing matches."""
+    all_aliases = set()
+    for alts in IMPORT_ALIASES.values():
+        all_aliases.update(alts)
+    for alts in COMPLETED_IMPORT_ALIASES.values():
+        all_aliases.update(alts)
+
+    best_idx, best_hits = 0, 0
+    for i, row in enumerate(rows[:max_scan]):
+        hits = sum(1 for cell in row if str(cell or "").strip() in all_aliases)
+        if hits > best_hits:
+            best_hits, best_idx = hits, i
+    return best_idx
+
+
+def _load_sheet(f, sheet_name=None):
+    """Load rows from an uploaded xlsx or csv file.
+    Returns (header_row, data_rows) where all values are plain strings/scalars.
+    Auto-detects which row contains the column headers (not necessarily row 1)."""
+    name = f.filename.lower()
+    if name.endswith(".xlsx"):
+        from openpyxl import load_workbook
+        wb = load_workbook(f, read_only=True, data_only=True)
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active
+        data = list(ws.iter_rows(values_only=True))
+        if not data:
+            raise ValueError("工作表是空的")
+        hi = _find_header_row(data)
+        return data[hi], data[hi + 1:]
+    elif name.endswith(".csv"):
+        rows = list(csv.reader(f.read().decode("utf-8-sig").splitlines()))
+        if not rows:
+            raise ValueError("檔案是空的")
+        hi = _find_header_row(rows)
+        return rows[hi], rows[hi + 1:]
+    else:
+        raise ValueError("僅支援 .csv 或 .xlsx 檔案")
+
+
+# ── GET sheet names (probe endpoint) ─────────────────────────────────
+@budgets_bp.post("/budgets/import/sheets")
+@require_auth
+def import_get_sheets():
+    """Return the list of sheet names in an uploaded xlsx (or a placeholder for csv)."""
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(error="未收到檔案"), 400
+    name = f.filename.lower()
+    if name.endswith(".xlsx"):
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(f, read_only=True, data_only=True)
+            return jsonify(sheets=wb.sheetnames)
+        except Exception as e:
+            return jsonify(error=f"檔案解析失敗：{e}"), 500
+    elif name.endswith(".csv"):
+        return jsonify(sheets=["(單一工作表)"])
+    else:
+        return jsonify(error="僅支援 .csv 或 .xlsx 檔案"), 400
 
 
 @budgets_bp.post("/budgets/import")
@@ -880,30 +1410,27 @@ def import_budgets():
     if not f or not f.filename:
         return jsonify(error="未收到檔案"), 400
 
-    name = f.filename.lower()
-    raw_rows = []
+    mode       = request.args.get("mode", "pending")   # "pending" | "completed"
+    sheet_name = request.args.get("sheet", None)
+
     try:
-        if name.endswith(".xlsx"):
-            from openpyxl import load_workbook
-            wb   = load_workbook(f, read_only=True, data_only=True)
-            data = list(wb.active.iter_rows(values_only=True))
-            if not data:
-                return jsonify(error="檔案是空的"), 400
-            idx      = _resolve_header(data[0])
-            raw_rows = data[1:]
-        elif name.endswith(".csv"):
-            reader   = list(csv.reader(io.StringIO(f.read().decode("utf-8-sig"))))
-            if not reader:
-                return jsonify(error="檔案是空的"), 400
-            idx      = _resolve_header(reader[0])
-            raw_rows = reader[1:]
-        else:
-            return jsonify(error="僅支援 .csv 或 .xlsx 檔案"), 400
+        header, raw_rows = _load_sheet(f, sheet_name)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
     except Exception as e:
         return jsonify(error=f"檔案解析失敗：{e}"), 500
 
+    if mode == "completed":
+        return _import_completed(header, raw_rows, user)
+    else:
+        return _import_pending(header, raw_rows, user)
+
+
+def _import_pending(header, raw_rows, user):
+    """Original import logic: upsert into AI_REVIEW status."""
+    idx = _resolve_header(header, IMPORT_ALIASES)
     if "project_name" not in idx:
-        return jsonify(error="找不到「項目名稱」欄位，請確認標題列"), 400
+        return jsonify(error="找不到「項目名稱 / Project Name」欄位，請確認標題列"), 400
 
     _, iso_week, _ = datetime.datetime.now().isocalendar()
     inserted, skipped, errors = 0, 0, []
@@ -922,6 +1449,7 @@ def import_budgets():
                 if not project:
                     skipped += 1
                     continue
+                cur.execute("SAVEPOINT _row")
                 try:
                     cur.execute(
                         """INSERT INTO budget.budget_requests
@@ -935,35 +1463,169 @@ def import_budgets():
                            WHERE budget_requests.status NOT IN
                                  ('CLOSED', 'REJECTED', 'PENDING_ACTION')
                            RETURNING id""",
-                        (
-                            project,
-                            iso_week,
-                            cell(row, "category"),
-                            cell(row, "owner"),
-                            _parse_amount(cell(row, "amount")),
-                            cell(row, "budget_no"),
-                        ),
+                        (project, iso_week, cell(row, "category"),
+                         cell(row, "owner"), _parse_amount(cell(row, "amount")),
+                         cell(row, "budget_no")),
                     )
-                    # No row returned → an already-reviewed case was protected
-                    # from being overwritten by re-import; count it as skipped.
-                    if cur.fetchone():
+                    row_result = cur.fetchone()
+                    cur.execute("RELEASE SAVEPOINT _row")
+                    if row_result:
                         inserted += 1
                     else:
                         skipped += 1
-                except Exception as re:
-                    errors.append(f"第 {n} 列：{re}")
+                except Exception as row_err:
+                    cur.execute("ROLLBACK TO SAVEPOINT _row")
+                    errors.append(f"第 {n} 列：{row_err}")
     except Exception as e:
         return jsonify(error=str(e)), 500
 
+    _audit_and_notify(user, inserted, skipped)
+    return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
+
+
+def _import_completed(header, raw_rows, user):
+    """Import historical completed records directly into CLOSED / REJECTED status."""
+    idx = _resolve_header(header, COMPLETED_IMPORT_ALIASES)
+    if "project_name" not in idx:
+        # Help diagnose: show what columns we did recognise
+        recognised = ", ".join(f"{k}←「{header[v]}」" for k, v in idx.items()) or "（無）"
+        return jsonify(
+            error=f"找不到「Project Name / 項目名稱」欄位，請確認標題列。"
+                  f"已識別欄位：{recognised}"
+        ), 400
+
+    _, iso_week, _ = datetime.datetime.now().isocalendar()
+    created, updated, skipped, errors = 0, 0, 0, []
+    derived_cat = 0           # rows that had 類別 back-filled from (系統,專家)
+    cycles_kept = 0           # rows kept as a separate review cycle (補送 suffix)
+    total_data_rows = sum(1 for r in raw_rows if any(v is not None and str(v).strip() for v in r))
+
+    def cell(row, field):
+        i = idx.get(field)
+        if i is None or i >= len(row):
+            return None
+        v = row[i]
+        return None if v is None or str(v).strip() == "" else str(v).strip()
+
+    def raw_cell(row, field):
+        i = idx.get(field)
+        if i is None or i >= len(row):
+            return None
+        return row[i]
+
+    try:
+        with db_cursor(commit=True) as cur:
+            for n, row in enumerate(raw_rows, start=2):
+                project = cell(row, "project_name")
+                if not project:
+                    skipped += 1
+                    continue
+                cur.execute("SAVEPOINT _row")
+                try:
+                    exp_dec, status = _parse_decision(cell(row, "expert_decision"))
+                    wk        = _parse_week(raw_cell(row, "week"), iso_week)
+                    amount    = _parse_amount(cell(row, "amount"))
+                    d_date    = _parse_date(raw_cell(row, "dispatch_date"))
+                    s_date    = _parse_date(raw_cell(row, "sign_date"))
+                    cycle     = _parse_cycle(cell(row, "cycle_time"))
+                    sub_cat   = cell(row, "sub_category")
+                    exp_nm    = cell(row, "expert_name")
+                    # Excel carries no top-level 類別 — back-fill from (系統,專家)
+                    category  = cell(row, "category") or _derive_category(sub_cat, exp_nm)
+                    if category and not cell(row, "category"):
+                        derived_cat += 1
+
+                    # Identity = (project_name, 派送日期). The same name with a
+                    # different 派送日期 is a separate review cycle (退件重審) and
+                    # must NOT be merged — store it under a 補送 suffix instead.
+                    like = (project.replace("\\", r"\\").replace("%", r"\%")
+                                    .replace("_", r"\_") + "（補送%")
+                    cur.execute(
+                        "SELECT id, project_name, dispatch_date "
+                        "FROM budget.budget_requests "
+                        "WHERE project_name = %s OR project_name LIKE %s",
+                        (project, like),
+                    )
+                    candidates = cur.fetchall()
+                    match_id, base_taken = None, False
+                    for c in candidates:
+                        if c["project_name"] == project:
+                            base_taken = True
+                        if match_id is None and _parse_date(c["dispatch_date"]) == d_date:
+                            match_id = c["id"]
+
+                    if match_id is not None:
+                        # Same case + same 派送日期 → refresh in place.
+                        cur.execute(
+                            """UPDATE budget.budget_requests SET
+                                   week=%s,
+                                   category=COALESCE(%s, category),
+                                   sub_category=COALESCE(%s, sub_category),
+                                   expert_name=COALESCE(%s, expert_name),
+                                   budget_no=COALESCE(%s, budget_no),
+                                   owner=COALESCE(%s, owner),
+                                   amount=COALESCE(NULLIF(%s,0), amount),
+                                   expert_comment=%s, expert_decision=%s,
+                                   dispatch_date=%s, sign_date=%s, cycle_time=%s,
+                                   note=%s, status=%s, updated_at=NOW()
+                               WHERE id=%s""",
+                            (wk, category, sub_cat, exp_nm, cell(row, "budget_no"),
+                             cell(row, "owner"), amount, cell(row, "expert_comment"),
+                             exp_dec, d_date, s_date, cycle, cell(row, "note"),
+                             status, match_id),
+                        )
+                        updated += 1
+                    else:
+                        # New row. If the base name is taken (a different cycle
+                        # already exists), keep this one under a 補送 suffix.
+                        name = project if not base_taken else _next_supplement_name(cur, project)
+                        if base_taken:
+                            cycles_kept += 1
+                        cur.execute(
+                            """INSERT INTO budget.budget_requests
+                                   (project_name, week, category, sub_category, expert_name,
+                                    budget_no, owner, amount, expert_comment, expert_decision,
+                                    dispatch_date, sign_date, cycle_time, note, status)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            (name, wk, category, sub_cat, exp_nm, cell(row, "budget_no"),
+                             cell(row, "owner"), amount, cell(row, "expert_comment"),
+                             exp_dec, d_date, s_date, cycle, cell(row, "note"), status),
+                        )
+                        created += 1
+                    cur.execute("RELEASE SAVEPOINT _row")
+                except Exception as row_err:
+                    cur.execute("ROLLBACK TO SAVEPOINT _row")
+                    errors.append(f"第 {n} 列：{row_err}")
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+    # Diagnostics: which logical field matched which Excel header
+    detected = {f: str(header[idx[f]]).strip() for f in idx}
+    unmatched = [f for f in COMPLETED_IMPORT_ALIASES if f not in idx]
+
+    _audit_and_notify(user, created + updated, skipped)
+    return jsonify(
+        inserted=created + updated,   # backward-compat
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        cycles_kept=cycles_kept,
+        derived_category=derived_cat,
+        total_rows=total_data_rows,
+        detected_columns=detected,
+        unmatched_fields=unmatched,
+        errors=errors[:50],   # return up to 50 error lines for diagnostics
+    )
+
+
+def _audit_and_notify(user, inserted, skipped):
     try:
         audit_log(None, "IMPORT", user.get("name", "system"), None,
                   {"inserted": inserted, "skipped": skipped})
     except Exception:
         pass
-
     _notify_roles(["admin"],
         f"📥 {user.get('name','系統')} 匯入了 {inserted} 筆案件（略過 {skipped} 筆）。")
-    return jsonify(inserted=inserted, skipped=skipped, errors=errors[:20])
 
 
 # ── Timeline ──────────────────────────────────────────────────────────

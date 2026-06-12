@@ -41,8 +41,9 @@ ENTITY_MAPPING = {
     "安全":    ["公危倉", "化學品泄露", "緊急應變", "洗眼器", "防護衣"],
     "消防":    ["防火門", "消防栓", "偵煙器", "廣播系統", "灑水頭", "消防法規", "消防泵"],
     "資安":    ["SCADA", "PLC", "自動化監測", "中控系統", "CCTV", "MOF電錶", "資訊安全", "資安", "網路安全", "防火牆", "弱點掃描", "滲透測試", "入侵偵測", "EDR", "SIEM", "ISO27001", "存取控制", "資安監控", "SOC"],
-    "AI自動化":["影像辨識模型", "深度學習", "AI演算法"],
+    "AI自動化":["影像辨識模型", "深度學習", "AI演算法", "AI系統", "AI Agent", "智慧化", "智能化"],
     "抽氣":    ["RRTO", "RTO", "沸石滾輪", "Scrubber", "洗滌塔", "有機排氣", "無機排氣", "排氣管路", "風車", "異味改善", "抽氣馬達"],
+    "環保":    ["廢棄物", "廢液", "環保法", "環保局", "環評", "ISO14001", "碳排", "溫室氣體", "環境評估", "廢氣排放", "環保稽查", "CSR", "ESG環境", "有害廢棄物", "環境影響評估"],
     "建管":    ["建置案", "餐廳建置", "老舊建物改善", "園管區", "結構安全", "防水工程"],
     "Relayout":["機台移位", "空間規劃", "隔間拆除", "裝修", "家具配置", "佈局調整"],
 }
@@ -67,14 +68,49 @@ LLM_RETRIES    = 2                       # LLM 回答無效時的重試次數
 LLM_FALLBACK_SYSTEM = "Relayout"
 
 LLM_WHITELIST = ["水務", "空壓", "空調", "電力", "安全", "消防", "資安",
-                 "AI自動化", "抽氣", "Relayout", "二次配", "建管"]
+                 "AI自動化", "抽氣", "環保", "Relayout", "二次配", "建管"]
 
 EXPERT_DB = {
     "設備擴充 (UTI)": {"空調": ["黃金燦"], "空壓": ["郭于斌"], "水務": ["梁益齊"], "抽氣": ["梁益齊"], "電力": ["李明鴻"], "資安": ["王嘉漢"]},
     "工程擴廠 (新工)": {"Relayout": ["陳信舟", "鄭仁勝", "紀志忠"], "二次配": ["陳信舟", "鄭仁勝", "紀志忠"], "空調": ["鄭仁勝"], "水務": ["陳妍方"], "抽氣": ["陳妍方"]},
     "CIM相關":  {"資安": ["王嘉漢"], "AI自動化": ["黃互慶"]},
-    "法遵 (ESH)": {"消防": ["吳明華"], "建管": ["吳明華"], "環保": ["姜婷毓"]},
+    "法遵 (ESH)": {"消防": ["吳明華"], "建管": ["吳明華"], "環保": ["姜婷毓"], "安全": ["楊小惠"]},
 }
+
+# ── 同系統多位專家時的輪流分派 ────────────────────────────────────────────
+# 進度記錄於 WORK_DIR/expert_rotation_state.json，跨次執行保留：
+# 同一(類別,系統)這次選了某人，下次該系統再有案件時就輪到下一位，
+# 全部輪完後從頭開始。
+EXPERT_ROTATION_FILE = os.path.join(WORK_DIR, "expert_rotation_state.json")
+
+
+def _load_rotation_state() -> dict:
+    try:
+        with open(EXPERT_ROTATION_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_rotation_state(state: dict):
+    try:
+        os.makedirs(WORK_DIR, exist_ok=True)
+        with open(EXPERT_ROTATION_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _pick_expert(category: str, system: str, experts: list, rotation_state: dict) -> str:
+    """從候選專家中輪流選出一位；只有一位則直接回傳；無人則回傳「待分配」。"""
+    if not experts:
+        return "待分配"
+    if len(experts) == 1:
+        return experts[0]
+    key = f"{category}|{system}"
+    idx = rotation_state.get(key, 0) % len(experts)
+    rotation_state[key] = (idx + 1) % len(experts)
+    return experts[idx]
 
 BOILERPLATE_NOISE = [
     "Need To Know", "會議機密", "四「不」原則", "不將會議記錄轉寄",
@@ -328,8 +364,8 @@ def classify_category(system, folder_and_header):
     # CIM 相關：資安（含原監控）/ AI自動化
     if system in ("AI自動化", "資安"):
         return "CIM相關"
-    # 法遵 (ESH)：消防 / 建管 / 安全
-    if system in ("消防", "建管", "安全"):
+    # 法遵 (ESH)：消防 / 建管 / 安全 / 環保
+    if system in ("消防", "建管", "安全", "環保"):
         return "法遵 (ESH)"
     # 工程擴廠 (新工)：二次配 / Relayout 一律歸新工
     if system in ("二次配", "Relayout"):
@@ -346,6 +382,7 @@ def process():
     folders = [d for d in os.listdir(INPUT_PATH)
                if os.path.isdir(os.path.join(INPUT_PATH, d)) and not d.startswith(".")]
 
+    rotation_state = _load_rotation_state()
     all_cases = []
     for folder in folders:
         print(f"  分析中：{folder}")
@@ -372,7 +409,7 @@ def process():
             "案件名稱":            folder,
             "判定系統":            system,
             "判定類別":            category,
-            "負責專家":            ", ".join(experts) if experts else "待分配",
+            "負責專家":            _pick_expert(category, system, experts, rotation_state),
             "檔案實體清單":         "\n".join(inventory),
             "所有檔案原文(按檔案分段)": full_text,
         })
@@ -400,7 +437,7 @@ def process():
             ).upper()
             case["判定類別"] = classify_category(sys_result, folder_header)
             experts = EXPERT_DB.get(case["判定類別"], {}).get(sys_result, [])
-            case["負責專家"] = ", ".join(experts) if experts else "待分配"
+            case["負責專家"] = _pick_expert(case["判定類別"], sys_result, experts, rotation_state)
             print(f"    → ✅ {sys_result} / {case['判定類別']}")
 
     # 此時 all_cases 已 100% 分配完成，無未知系統
@@ -408,15 +445,56 @@ def process():
     _save(os.path.join(WORK_DIR, "pytollm_output.json"), all_cases)
     _save(os.path.join(WORK_DIR, "system_defined.json"), all_cases)
     _save(os.path.join(WORK_DIR, "system_unknown.json"), [])   # 恆為空，保留檔案相容性
+    _save_rotation_state(rotation_state)  # 記錄本次輪流進度，供下次執行接續
 
     print(f"\n✅ 完成：共 {len(all_cases)} 筆全部判定完成"
           f"（規則 {rule_count} 筆 / LLM {len(rule_unknown)} 筆），無未知系統")
-    print("   → 直接執行 pipeline_2.py（本地審核並寫入 DB）")
+
+    # ── 複製結果到剪貼簿（供 RPA 取走送至線上 AI 審核）───────────────────
+    _copy_to_clipboard(all_cases)
+    print("   → 結果已複製至剪貼簿，請啟動 RPA 並貼上後送至線上 AI 審核")
 
 
 def _save(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def _copy_to_clipboard(cases: list):
+    """
+    將分類結果複製至剪貼簿（JSON 格式），供 RPA 取走送至線上 AI 審核。
+    格式：JSON 陣列，每筆含 案件名稱/判定系統/判定類別/負責專家/檔案實體清單/所有檔案原文。
+    優先使用 pyperclip；失敗則嘗試 win32clipboard；皆無則存至 clipboard_output.txt。
+    """
+    text = json.dumps(cases, indent=2, ensure_ascii=False)
+    saved = False
+
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        print(f"📋 已複製 {len(cases)} 筆至剪貼簿（pyperclip）")
+        saved = True
+    except Exception:
+        pass
+
+    if not saved:
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+            win32clipboard.CloseClipboard()
+            print(f"📋 已複製 {len(cases)} 筆至剪貼簿（win32clipboard）")
+            saved = True
+        except Exception:
+            pass
+
+    if not saved:
+        fallback = os.path.join(WORK_DIR, "clipboard_output.txt")
+        with open(fallback, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"⚠️  剪貼簿寫入失敗，結果已存至：{fallback}")
+        print("   （請手動複製該檔案內容送至線上 AI）")
 
 
 if __name__ == "__main__":

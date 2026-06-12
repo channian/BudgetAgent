@@ -1,11 +1,10 @@
 from flask import Blueprint, request, jsonify
-from werkzeug.security import generate_password_hash
 from db import cursor as db_cursor, row_to_dict
 from routes.auth import require_auth, current_user
 
 users_bp = Blueprint("users", __name__)
 
-ROLES = ("admin", "boss", "expert", "viewer")
+ROLES = ("admin", "expert", "viewer")
 
 
 # ── List all users ────────────────────────────────────────────────────
@@ -39,14 +38,10 @@ def create_user():
     role       = (data.get("role")       or "viewer").strip()
     department = (data.get("department") or "").strip() or None
     email      = (data.get("email")      or "").strip() or None
-    password   = (data.get("password")   or "").strip()
-
     if not name or not ad_account:
         return jsonify(error="姓名與 AD 帳號為必填"), 400
     if role not in ROLES:
         return jsonify(error=f"角色必須是 {'/'.join(ROLES)} 其中之一"), 400
-
-    hashed = generate_password_hash(password) if password else ""
 
     try:
         with db_cursor(commit=True) as cur:
@@ -54,7 +49,7 @@ def create_user():
                 """INSERT INTO budget.users (name, department, ad_account, password, role, email)
                    VALUES (%s, %s, %s, %s, %s, %s)
                    RETURNING id""",
-                (name, department, ad_account, hashed, role, email),
+                (name, department, ad_account, "", role, email),
             )
             new_id = cur.fetchone()["id"]
     except Exception as e:
@@ -98,26 +93,31 @@ def update_user(user_id):
     return jsonify(user=row_to_dict(row))
 
 
-# ── Reset password (admin only) ───────────────────────────────────────
-@users_bp.put("/users/<int:user_id>/password")
+# ── Delete user (admin only) ──────────────────────────────────────────
+@users_bp.delete("/users/<int:user_id>")
 @require_auth
-def reset_password(user_id):
+def delete_user(user_id):
     caller = current_user()
     if caller.get("role") != "admin":
-        return jsonify(error="僅系統管理員可重設密碼"), 403
+        return jsonify(error="僅系統管理員可刪除使用者"), 403
+    if caller.get("id") == user_id:
+        return jsonify(error="無法刪除自己的帳號"), 400
 
-    data     = request.json or {}
-    new_pass = (data.get("password") or "").strip()
-    if not new_pass:
-        return jsonify(error="密碼不得為空"), 400
-
-    hashed = generate_password_hash(new_pass)
     try:
+        with db_cursor() as cur:
+            cur.execute("SELECT role FROM budget.users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+        if not row:
+            return jsonify(error="使用者不存在"), 404
+        if row_to_dict(row)["role"] == "admin":
+            with db_cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM budget.users WHERE role = 'admin'")
+                if cur.fetchone()["n"] <= 1:
+                    return jsonify(error="無法刪除最後一位系統管理員"), 400
         with db_cursor(commit=True) as cur:
-            cur.execute(
-                "UPDATE budget.users SET password = %s WHERE id = %s",
-                (hashed, user_id),
-            )
+            cur.execute("DELETE FROM budget.users WHERE id = %s", (user_id,))
     except Exception as e:
         return jsonify(error=str(e)), 500
+
     return jsonify(ok=True)
+

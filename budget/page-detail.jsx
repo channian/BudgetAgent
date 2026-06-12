@@ -1,5 +1,16 @@
 /* Budget detail / approval page */
 
+// AI 原因文字以連續敘述存放（無 \n），但每個「【段落標題】」應另起一行並空一行
+function renderReason(text) {
+  if (!text) return "—";
+  return text.split(/(?=【)/g).map((part, i) => (
+    <React.Fragment key={i}>
+      {i > 0 && <><br/><br/></>}
+      {part}
+    </React.Fragment>
+  ));
+}
+
 const ACTION_LABELS = {
   CREATE:                "建立預算單",
   UPDATE:                "欄位更新",
@@ -10,13 +21,68 @@ const ACTION_LABELS = {
   SLA_REMINDER:          "SLA 催辦",
 };
 
-function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onDelete, onEdit, currentUser }) {
+function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveReview, onDelete, onEdit, currentUser, fromRoute }) {
   const [comment,  setComment]  = React.useState(budget.expertComment || "");
   const [decision, setDecision] = React.useState(budget.expertResult);
   const [timeline, setTimeline] = React.useState([]);
   const [tlLoading, setTlLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+
+  // Attachments
+  const [attachments,   setAttachments]   = React.useState([]);
+  const [attLoading,    setAttLoading]    = React.useState(false);
+  const [attUploading,  setAttUploading]  = React.useState(false);
+  const fileInputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!budget.dbId) return;
+    setAttLoading(true);
+    API.fetchAttachments(budget.dbId)
+      .then(list => setAttachments(list))
+      .catch(() => {})
+      .finally(() => setAttLoading(false));
+  }, [budget.dbId]);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAttUploading(true);
+    try {
+      const att = await API.uploadAttachment(budget.dbId, file);
+      setAttachments(prev => [...prev, att]);
+    } catch (err) {
+      alert("上傳失敗：" + err.message);
+    } finally {
+      setAttUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteAtt = async (att) => {
+    if (!confirm(`確定刪除附件「${att.original_name}」？`)) return;
+    try {
+      await API.deleteAttachment(att.id);
+      setAttachments(prev => prev.filter(a => a.id !== att.id));
+    } catch (err) {
+      alert("刪除失敗：" + err.message);
+    }
+  };
+
+  const handleDownloadAtt = async (att) => {
+    try {
+      await API.downloadAttachment(att.id, att.original_name);
+    } catch (err) {
+      alert("下載失敗：" + err.message);
+    }
+  };
+
+  const fmtFileSize = (bytes) => {
+    if (!bytes) return "—";
+    if (bytes < 1024)       return `${bytes} B`;
+    if (bytes < 1024*1024)  return `${(bytes/1024).toFixed(1)} KB`;
+    return `${(bytes/1024/1024).toFixed(1)} MB`;
+  };
 
   const role     = currentUser?.role || "viewer";
   const isViewer = role === "viewer";
@@ -39,8 +105,9 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
 
   const lockBusy      = needsLock && lockState === "busy";
   const lockedByOther = needsLock && lockState && lockState !== "busy" && !lockState.ok;
-  const canReview = isOpen && role === "expert" && !lockBusy && !lockedByOther;
-  const canSign   = isOpen && (role === "admin" || role === "boss");
+  // Expert can only fill in review when arriving from the 待專家審核 tab
+  const canReview = isOpen && role === "expert" && fromRoute === "expert_review" && !lockBusy && !lockedByOther;
+  const canSign   = isOpen && role === "admin";
 
   const cyc = MOCK.cycleTime(budget.dispatchDate, budget.signDate || new Date());
 
@@ -110,7 +177,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
           </div>
         </div>
         <div className="actions">
-          {!isFinal && !isViewer && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
+          {!isFinal && !isViewer && !canReview && <button className="btn" onClick={() => onEdit(budget)}>編輯</button>}
           {isAdmin && (
             <div className="more-wrap">
               <button
@@ -168,9 +235,9 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
               </div>
             </div>
             <div className="card-body">
-              <div className="ai-block">
+              <div className={`ai-block${budget.aiResult === "approve" ? " approve" : ""}`}>
                 <h4>原因 / Reason</h4>
-                <div className="reason">{budget.aiReason || "—"}</div>
+                <div className="reason">{renderReason(budget.aiReason)}</div>
               </div>
             </div>
           </div>
@@ -239,7 +306,7 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
                     )}
                     <span className="spacer-x" />
                     <span className="hint">
-                      {canSign ? "簽核後不可變更，將同步至 ERP" : "儲存後將送交 boss / 管理員簽核"}
+                      {canSign ? "簽核後不可變更，將同步至 ERP" : "儲存後案件自動進入待簽核，由系統管理員最終簽核"}
                     </span>
                   </div>
                 </>
@@ -272,6 +339,64 @@ function DetailPage({ budget, onBack, onApprove, onReject, onReturn, onSaveRevie
               </div>
             </div>
           )}
+
+          {/* Attachments */}
+          <div className="card">
+            <div className="card-head">
+              <h3>附件 <span className="tag">ATTACHMENTS</span></h3>
+              {!isViewer && (
+                <>
+                  <button
+                    className="btn sm"
+                    disabled={attUploading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {attUploading ? "上傳中…" : "+ 上傳附件"}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    style={{ display: "none" }}
+                    onChange={handleFileUpload}
+                  />
+                </>
+              )}
+            </div>
+            <div className="card-body">
+              {attLoading ? (
+                <div className="hint">載入中…</div>
+              ) : attachments.length === 0 ? (
+                <div className="hint">無附件</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {attachments.map(att => (
+                    <div key={att.id} className="flex-row" style={{ background: "var(--surface-2)", padding: "8px 12px", borderRadius: "var(--radius-sm)", gap: 8 }}>
+                      <span style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={att.original_name}>
+                        {att.original_name}
+                      </span>
+                      <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{fmtFileSize(att.file_size)}</span>
+                      <button
+                        className="btn ghost sm"
+                        style={{ padding: "2px 10px", fontSize: 11 }}
+                        onClick={() => handleDownloadAtt(att)}
+                      >
+                        下載
+                      </button>
+                      {(role === "admin" || att.uploaded_by === currentUser?.name) && (
+                        <button
+                          className="btn ghost sm"
+                          style={{ padding: "2px 8px", fontSize: 11, color: "var(--bad)" }}
+                          onClick={() => handleDeleteAtt(att)}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Right column */}

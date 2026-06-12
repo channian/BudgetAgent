@@ -139,6 +139,32 @@ function ResultBadge({ result, kind }) {
   return <span className={`badge ${s.cls}`}><span className="b-dot" />{s.label}</span>;
 }
 
+// SLA 燈號門檻（天數，從派送日期起算）— 須與 backend/utils/sla.py 一致
+//   黃燈：第 3 天起，紅燈：第 6 天起（提前一天）
+// 一旦案件填寫專家評論（進入待簽核），即不再顯示燈號。
+const SLA_YELLOW_DAYS = 3;
+const SLA_RED_DAYS    = 6;
+
+function slaInfo(b) {
+  if (b.status !== "EXPERT_REVIEW") return null;
+  if (b.expertComment && b.expertComment.trim()) return null;
+  if (!b.dispatchDate) return null;
+  const days = Math.floor((Date.now() - new Date(b.dispatchDate)) / 86400000);
+  if (days >= SLA_RED_DAYS)    return { level: "red",    days };
+  if (days >= SLA_YELLOW_DAYS) return { level: "yellow", days };
+  return { level: "green", days };
+}
+
+function SlaLight({ budget }) {
+  const info = slaInfo(budget);
+  if (!info || info.level === "green") {
+    return <span style={{ color: "var(--text-muted)" }}>—</span>;
+  }
+  return info.level === "red"
+    ? <span className="badge bad"><span className="b-dot"/>🔴 紅燈 {info.days}天</span>
+    : <span className="badge warn"><span className="b-dot"/>🟡 黃燈 {info.days}天</span>;
+}
+
 function Conf({ value }) {
   const v = value / 100;
   const tier = v >= 0.8 ? "hi" : v >= 0.6 ? "md" : "lo";
@@ -172,42 +198,18 @@ function fmtAmount(n) {
   return new Intl.NumberFormat("zh-TW").format(n);
 }
 
-function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collapsed, onToggleCollapse }) {
+function Sidebar({ route, setRoute, pendingCount, expertReviewCount, fromRoute, width, onResize, user, collapsed, onToggleCollapse }) {
   const role = user?.role || "viewer";
 
-  // Change-password modal
-  const [pwdOpen,  setPwdOpen]  = React.useState(false);
-  const [pwd1,     setPwd1]     = React.useState("");
-  const [pwd2,     setPwd2]     = React.useState("");
-  const [pwdErr,   setPwdErr]   = React.useState("");
-  const [pwdOk,    setPwdOk]    = React.useState(false);
-  const [pwdBusy,  setPwdBusy]  = React.useState(false);
-
-  const openPwd = () => { setPwd1(""); setPwd2(""); setPwdErr(""); setPwdOk(false); setPwdOpen(true); };
-  const closePwd = () => setPwdOpen(false);
-
-  const submitPwd = async () => {
-    if (!pwd1) { setPwdErr("請輸入新密碼"); return; }
-    if (pwd1 !== pwd2) { setPwdErr("兩次輸入不一致"); return; }
-    setPwdBusy(true); setPwdErr("");
-    try {
-      await API.changeMyPassword(pwd1);
-      setPwdOk(true);
-      setTimeout(closePwd, 1500);
-    } catch (e) {
-      setPwdErr(e.message);
-    } finally {
-      setPwdBusy(false);
-    }
-  };
-
   const allItems = [
-    { id: "pending",     label: "待簽核",          icon: <Icon.Inbox />,    count: pendingCount, dot: true,  roles: ["admin","boss","expert","viewer"] },
-    { id: "approved",    label: "已簽核完成",       icon: <Icon.Check />,                          roles: ["admin","boss","expert","viewer"] },
-    { id: "library",     label: "AI Agent 圖書館",  icon: <Icon.Book />,                           roles: ["admin","boss","expert","viewer"] },
-    { id: "assignment",  label: "派發中心人員設定",  icon: <Icon.Users />,                          roles: ["admin"] },
-    { id: "permissions", label: "權限管理中心",      icon: <Icon.Shield />,                         roles: ["admin"] },
-    { id: "activity",    label: "使用狀況",          icon: <Icon.Activity />,                       roles: ["admin"] },
+    { id: "pending",       label: "待簽核",          icon: <Icon.Inbox />,    count: pendingCount,      dot: true, roles: ["admin","expert","viewer"] },
+    { id: "expert_review", label: "待專家審核",       icon: <Icon.Users />,   count: expertReviewCount, dot: true, roles: ["admin","expert","viewer"] },
+    { id: "approved",      label: "已簽核完成",       icon: <Icon.Check />,                              roles: ["admin","expert","viewer"] },
+    { id: "library",       label: "AI Agent 圖書館",  icon: <Icon.Book />,                               roles: ["admin","expert","viewer"] },
+    { id: "data_import",   label: "前端資料導入",      icon: <Icon.Upload />,                             roles: ["admin"] },
+    { id: "assignment",    label: "派發中心人員設定",  icon: <Icon.Shield />,                             roles: ["admin"] },
+    { id: "permissions",   label: "權限管理中心",      icon: <Icon.Shield />,                             roles: ["admin"] },
+    { id: "activity",      label: "使用狀況",          icon: <Icon.Activity />,                           roles: ["admin"] },
   ];
 
   const items = allItems.filter(it => it.roles.includes(role));
@@ -255,7 +257,9 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
       {!narrow && <div className="sidebar-section">主功能</div>}
       <nav className="sidebar-nav">
         {items.map((it) => {
-          const active = route === it.id || it.id === "pending" && (route === "detail" || route === "edit" || route === "new");
+          const active = route === it.id
+            || (it.id === "pending"       && (route === "edit" || route === "new" || (route === "detail" && fromRoute === "pending")))
+            || (it.id === "expert_review" && route === "detail" && fromRoute === "expert_review");
           return (
             <div key={it.id} className={`nav-item ${active ? "active" : ""}`} onClick={() => setRoute(it.id)} title={narrow ? it.label : ""}>
               <span className="icon">{it.icon}</span>
@@ -267,12 +271,12 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
         })}
       </nav>
       <div className="sidebar-foot">
-        <div className="avatar" style={{ cursor: "pointer" }} title="修改密碼" onClick={openPwd}>
+        <div className="avatar">
           {user?.name?.charAt(0) || "?"}
         </div>
         {!narrow &&
         <>
-            <div className="who" style={{ cursor: "pointer" }} onClick={openPwd} title="修改密碼">
+            <div className="who">
               <div className="n">{user?.name || "—"}</div>
               <div className="r">{role} · {user?.department || ""}</div>
             </div>
@@ -289,34 +293,6 @@ function Sidebar({ route, setRoute, pendingCount, width, onResize, user, collaps
         onDoubleClick={() => onResize(240)}
         title="拖曳調整寬度，雙擊重設" />
 
-      {/* ── Change-password modal ── */}
-      {pwdOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "oklch(0 0 0 / 0.45)", zIndex: 300, display: "grid", placeItems: "center" }}
-             onClick={e => e.target === e.currentTarget && closePwd()}>
-          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, width: 320, maxWidth: "92vw", display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <strong style={{ fontSize: 15 }}>修改密碼</strong>
-              <button className="btn ghost sm" onClick={closePwd}>✕</button>
-            </div>
-            <div className="field">
-              <label>新密碼</label>
-              <input type="password" value={pwd1} onChange={e => setPwd1(e.target.value)}
-                placeholder="輸入新密碼（支援英數及符號）" autoFocus/>
-            </div>
-            <div className="field">
-              <label>確認新密碼</label>
-              <input type="password" value={pwd2} onChange={e => setPwd2(e.target.value)}
-                placeholder="再次輸入確認"
-                onKeyDown={e => e.key === "Enter" && submitPwd()}/>
-            </div>
-            {pwdErr && <div style={{ color: "var(--bad)", fontSize: 12 }}>⚠ {pwdErr}</div>}
-            {pwdOk  && <div style={{ color: "var(--ok)",  fontSize: 12 }}>✅ 密碼已更新！</div>}
-            <button className="btn primary" onClick={submitPwd} disabled={pwdBusy}>
-              {pwdBusy ? "更新中…" : "確認修改"}
-            </button>
-          </div>
-        </div>
-      )}
     </aside>);
 
 }

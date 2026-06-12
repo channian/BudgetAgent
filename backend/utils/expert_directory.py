@@ -1,8 +1,10 @@
 """Resolve an expert's (Mandarin) name → email address.
 
 Lookup order:
-  1. base.kh_ad_employees  (empname → email)  — primary
-  2. Active Directory displayName              — fallback if LDAP configured
+  1. budget.users (name → email)               — primary; the email an admin
+                                                  fills in at 權限管理中心
+  2. base.kh_ad_employees  (empname → email)   — HR directory
+  3. Active Directory displayName              — fallback if LDAP configured
 """
 import logging
 import time
@@ -16,6 +18,23 @@ _cache: dict = {}  # {normalised_name: (email_or_None, expire_ts)}
 
 def _norm(s):
     return "".join((s or "").split()).lower()
+
+
+def _query_users_db(expert_name: str):
+    """Look up the email in budget.users by name (app-managed, admin-editable)."""
+    from db import cursor as db_cursor
+    try:
+        with db_cursor() as cur:
+            cur.execute(
+                "SELECT email FROM budget.users WHERE name = %s AND email IS NOT NULL LIMIT 1",
+                (expert_name,),
+            )
+            row = cur.fetchone()
+        if row and row.get("email") and "@" in str(row["email"]):
+            return str(row["email"]).strip()
+    except Exception as e:
+        logger.warning("users DB lookup failed for %r: %s", expert_name, e)
+    return None
 
 
 def _query_hr_db(expert_name: str):
@@ -49,13 +68,17 @@ def resolve_email(expert_name: str):
     if cached and now < cached[1]:
         return cached[0]
 
-    email = _query_hr_db(expert_name)
-    _cache[key] = (email, now + _CACHE_TTL)
+    # 1. App users table (權限管理中心) — highest priority
+    email = _query_users_db(expert_name)
+    # 2. HR employee directory
+    if not email:
+        email = _query_hr_db(expert_name)
 
+    _cache[key] = (email, now + _CACHE_TTL)
     if email:
         return email
 
-    # AD fallback (only if LDAP is configured)
+    # 3. AD fallback (only if LDAP is configured)
     try:
         from utils.ldap_lookup import lookup_email_by_name
         return lookup_email_by_name(expert_name)
